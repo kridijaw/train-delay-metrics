@@ -178,13 +178,14 @@ module TrainDelayMetrics
     end
 
     def self.derive_filename(from_spec, to_spec)
-      "#{slug_spec(from_spec)}_to_#{slug_spec(to_spec)}.json"
+      "tbs_#{slug_spec(from_spec)}_to_#{slug_spec(to_spec)}.json"
     end
 
     def self.slug_spec(spec)
       s = spec.to_s
       s = s[1..] if s.start_with?("@")
       s = File.basename(s, ".*") if s.include?(".")
+      s = s.sub(/\Astation_/, "")
       Slug.slugify(s)
     end
 

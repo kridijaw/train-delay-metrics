@@ -124,14 +124,14 @@ bundle exec bin/find-train-stations berlin --types ICE --out
 bundle exec bin/find-train-stations regensburg --types ICE --out
 bundle exec bin/find-train-stations koeln --types ICE --out
 bundle exec bin/trains-by-station --from all --to all --years 1 --group-by-stops --out
-# → out/station_berlin_to_station_regensburg.json, out/station_berlin_to_station_koeln.json, ...
+# → out/tbs_berlin_to_regensburg.json, out/tbs_berlin_to_koeln.json, ...
 ```
 
 For each EVA in the union of `--from` / `--to`, prints the alphabetically sorted list of trains that touch that EVA *and* connect any from-EVA to any to-EVA in the window. The `Side` column shows whether the EVA came from `--from`, `--to`, or both. Useful for figuring out which platform-group EVAs (e.g. S-Bahn `08098xxx` vs long-distance `08000xxx`) each train uses. `--exclude-types` drops train types like `FLX` (FlixTrain) before grouping.
 
 `--group-by-stops` flips the layout: instead of one row per EVA, prints one block per *coverage set* — the exact subset of from/to EVAs each train touches. Each train appears in exactly one group (the largest subset that fully matches its observed stops). Useful for separating trains that stop at, say, both Berlin Hbf and Berlin Gesundbrunnen from those that only stop at one.
 
-`--out FILE` additionally serialises the EVAs↔trains mapping to JSON (bare names land under `out/`). Each entry is `{ "evas": [...], "trains": [...] }`. Pass `--out` without a value to auto-derive the filename as `<from-spec>_to_<to-spec>.json`. `train-delay --input FILE` consumes this format and runs the delay query once per group, measuring delay at any of the group's EVAs:
+`--out FILE` additionally serialises the EVAs↔trains mapping to JSON (bare names land under `out/`). Each entry is `{ "evas": [...], "trains": [...] }`. Pass `--out` without a value to auto-derive the filename as `tbs_<from-spec>_to_<to-spec>.json` (the `station_` prefix on `@station_*.txt` specs is dropped, so `@station_berlin.txt → @station_regensburg.txt` becomes `tbs_berlin_to_regensburg.json`). `train-delay --input FILE` consumes this format and runs the delay query once per group, measuring delay at any of the group's EVAs:
 
 ```sh
 bundle exec bin/trains-by-station --from 08011160,08011102 --to 08000105,08000207 --group-by-stops --out berlin.json
