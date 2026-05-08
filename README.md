@@ -59,7 +59,7 @@ bundle exec bin/find-train-stations frankfurt
 bundle exec bin/find-train-stations "berlin sp%"
 bundle exec bin/find-train-stations frankfurt --types IC,ICE   # only EVAs with IC/ICE service
 bundle exec bin/find-train-stations frankfurt --types IC,ICE --out frankfurt-evas.txt   # save EVAs to out/
-bundle exec bin/find-train-stations frankfurt --types IC,ICE --out                       # derives out/station-frankfurt.txt
+bundle exec bin/find-train-stations frankfurt --types IC,ICE --out                       # derives out/station_frankfurt.txt
 ```
 
 ```
@@ -121,7 +121,7 @@ For each EVA in the union of `--from` / `--to`, prints the alphabetically sorted
 
 `--group-by-stops` flips the layout: instead of one row per EVA, prints one block per *coverage set* — the exact subset of from/to EVAs each train touches. Each train appears in exactly one group (the largest subset that fully matches its observed stops). Useful for separating trains that stop at, say, both Berlin Hbf and Berlin Gesundbrunnen from those that only stop at one.
 
-`--out FILE` additionally serialises the EVAs↔trains mapping to JSON (bare names land under `out/`). Each entry is `{ "evas": [...], "trains": [...] }`. Pass `--out` without a value to auto-derive the filename as `<from-spec>-to-<to-spec>.json`. `train-delay --input FILE` consumes this format and runs the delay query once per group, measuring delay at any of the group's EVAs:
+`--out FILE` additionally serialises the EVAs↔trains mapping to JSON (bare names land under `out/`). Each entry is `{ "evas": [...], "trains": [...] }`. Pass `--out` without a value to auto-derive the filename as `<from-spec>_to_<to-spec>.json`. `train-delay --input FILE` consumes this format and runs the delay query once per group, measuring delay at any of the group's EVAs:
 
 ```sh
 bundle exec bin/trains-by-station --from 08011160,08011102 --to 08000105,08000207 --group-by-stops --out berlin.json

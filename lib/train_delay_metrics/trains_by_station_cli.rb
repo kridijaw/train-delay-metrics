@@ -126,7 +126,7 @@ module TrainDelayMetrics
     end
 
     def self.derive_filename(from_spec, to_spec)
-      "#{slug_spec(from_spec)}-to-#{slug_spec(to_spec)}.json"
+      "#{slug_spec(from_spec)}_to_#{slug_spec(to_spec)}.json"
     end
 
     def self.slug_spec(spec)

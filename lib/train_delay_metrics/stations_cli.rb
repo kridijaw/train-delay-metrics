@@ -69,7 +69,7 @@ module TrainDelayMetrics
     def self.derive_filename(pattern_raw)
       slug = Slug.slugify(pattern_raw)
       slug = "all" if slug.empty?
-      "station-#{slug}.txt"
+      "station_#{slug}.txt"
     end
   end
 end
