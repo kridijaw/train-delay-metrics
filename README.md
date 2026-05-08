@@ -102,7 +102,7 @@ bundle exec bin/get-trains --from 08000105,08098105 --to 08000207,08098207 --exc
 bundle exec bin/get-trains --from 08000105 --to 08000207 --out trains.txt
 ```
 
-Prints an alphabetically sorted, deduplicated list of `train_name` values that connect the stations — no times, days, or counts. Accepts the same `--from`, `--to`, `--years`, `--exclude-types`, and `--data` options as `train-connections`. With `--out FILE` the list is written one-per-line to `FILE` (consumable by `train-delay --train @FILE`); without it, names go to stdout below the `Window:` summary.
+Prints an alphabetically sorted, deduplicated list of `train_name` values that connect the stations — no times, days, or counts. Accepts the same `--from`, `--to`, `--years`, `--exclude-types`, and `--data` options as `train-connections`. With `--out FILE` the list is written one-per-line; bare filenames land under `out/` (which is tracked but its contents are gitignored), paths with a directory component are used as-is. Without `--out`, names go to stdout below the `Window:` summary. Output files are consumable by `train-delay --train @FILE`.
 
 ### Argument notes
 

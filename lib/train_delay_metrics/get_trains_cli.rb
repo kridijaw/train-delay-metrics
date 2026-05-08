@@ -1,9 +1,12 @@
 require "date"
+require "fileutils"
 require "optparse"
 require_relative "connections"
 
 module TrainDelayMetrics
   class GetTrainsCLI
+    OUT_DIR = "out".freeze
+
     def self.run(argv, stdout: $stdout, stderr: $stderr)
       options = {
         years_back:    nil,
@@ -21,7 +24,7 @@ module TrainDelayMetrics
         o.on("--to LIST",   Array, "Destination EVA(s), comma-separated") { |v| options[:to_evas] = v }
         o.on("--years N", Integer, "Years of history (default: all available data)") { |v| options[:years_back] = v }
         o.on("--exclude-types LIST", Array, %q{Exclude train_types (case-insensitive), e.g. --exclude-types FLX,DPF}) { |v| options[:exclude_types] = v }
-        o.on("--out FILE", "Write the train-name list to FILE, one per line.") { |v| options[:out] = v }
+        o.on("--out FILE", "Write the train-name list to FILE, one per line. Bare filenames are saved under #{OUT_DIR}/.") { |v| options[:out] = v }
         o.on("--data GLOB", "Parquet glob (default #{Query::DEFAULT_GLOB})") { |v| options[:parquet_glob] = v }
         o.on("-h", "--help") { stdout.puts o; return 0 }
       end
@@ -63,8 +66,10 @@ module TrainDelayMetrics
       end
 
       if options[:out]
-        File.write(options[:out], names.join("\n") + "\n")
-        stdout.puts "Wrote #{names.size} train names to #{options[:out]}."
+        path = options[:out].include?(File::SEPARATOR) ? options[:out] : File.join(OUT_DIR, options[:out])
+        FileUtils.mkdir_p(File.dirname(path))
+        File.write(path, names.join("\n") + "\n")
+        stdout.puts "Wrote #{names.size} train names to #{path}."
       else
         names.each { |n| stdout.puts n }
       end
