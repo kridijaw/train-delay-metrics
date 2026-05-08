@@ -65,6 +65,7 @@ module TrainDelayMetrics
 
       from_set = options[:from_evas]
       to_set   = options[:to_evas]
+      rows = rows.sort_by { |r| [from_set.include?(r.eva) ? 0 : 1, r.eva] }
       name_w   = [rows.map { |r| (r.station_name || "").length }.max, 7].max
       term_w   = terminal_width
       prefix_w = 8 + 2 + 7 + 2 + name_w + 2 # EVA + Side + Station columns + gaps
