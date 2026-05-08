@@ -1,3 +1,4 @@
+require "date"
 require "optparse"
 require_relative "connections"
 
@@ -5,7 +6,7 @@ module TrainDelayMetrics
   class ConnectionsCLI
     def self.run(argv, stdout: $stdout, stderr: $stderr)
       options = {
-        years_back:   3,
+        years_back:   nil,
         parquet_glob: Query::DEFAULT_GLOB
       }
 
@@ -13,7 +14,7 @@ module TrainDelayMetrics
         o.banner = "Usage: train-connections --from EVA[,EVA...] --to EVA[,EVA...] [options]"
         o.on("--from LIST", Array, "Origin EVA(s), comma-separated, e.g. 08000105 or 08000105,08098105") { |v| options[:from_evas] = v }
         o.on("--to LIST",   Array, "Destination EVA(s), comma-separated")                                 { |v| options[:to_evas]   = v }
-        o.on("--years N", Integer, "Years of history (default 3)")  { |v| options[:years_back]   = v }
+        o.on("--years N", Integer, "Years of history (default: all available data)") { |v| options[:years_back] = v }
         o.on("--data GLOB", "Parquet glob (default #{Query::DEFAULT_GLOB})") { |v| options[:parquet_glob] = v }
         o.on("-h", "--help") { stdout.puts o; return 0 }
       end
@@ -31,7 +32,18 @@ module TrainDelayMetrics
         return 2
       end
 
-      rows = Connections.new(parquet_glob: options[:parquet_glob]).run(
+      svc = Connections.new(parquet_glob: options[:parquet_glob])
+
+      window_from, window_to =
+        if options[:years_back]
+          [(Date.today << (options[:years_back] * 12)).to_s, Date.today.to_s]
+        else
+          min_d, max_d = svc.data_date_range
+          [min_d&.to_s || "(none)", max_d&.to_s || "(none)"]
+        end
+      stdout.puts "Window: #{window_from} -> #{window_to}#{options[:years_back] ? " (--years #{options[:years_back]})" : " (full dataset)"}"
+
+      rows = svc.run(
         from_eva:    options[:from_evas],
         to_eva:      options[:to_evas],
         years_back:  options[:years_back]

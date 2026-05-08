@@ -18,7 +18,7 @@ module TrainDelayMetrics
       @connection = connection
     end
 
-    def run(from_eva:, to_eva:, years_back:)
+    def run(from_eva:, to_eva:, years_back: nil)
       from_evas = Array(from_eva).map(&:to_s).reject(&:empty?)
       to_evas   = Array(to_eva).map(&:to_s).reject(&:empty?)
       raise ArgumentError, "from_eva must not be empty" if from_evas.empty?
@@ -28,6 +28,8 @@ module TrainDelayMetrics
       from_placeholders = (["?"] * from_evas.size).join(", ")
       to_placeholders   = (["?"] * to_evas.size).join(", ")
       all_placeholders  = (["?"] * all_evas.size).join(", ")
+
+      year_filter = years_back ? "AND COALESCE(departure_planned_time, arrival_planned_time) >= CURRENT_DATE - (INTERVAL 1 YEAR) * ?" : ""
 
       sql = <<~SQL
         WITH stops AS (
@@ -40,9 +42,8 @@ module TrainDelayMetrics
             any_value(departure_planned_time) AS dep,
             any_value(arrival_planned_time)   AS arr
           FROM read_parquet(?)
-          WHERE COALESCE(departure_planned_time, arrival_planned_time)
-                >= CURRENT_DATE - (INTERVAL 1 YEAR) * ?
-            AND eva IN (#{all_placeholders})
+          WHERE eva IN (#{all_placeholders})
+            #{year_filter}
           GROUP BY train_line_ride_id, eva, plan_date
         ),
         pairs AS (
@@ -71,7 +72,9 @@ module TrainDelayMetrics
       SQL
 
       stmt = connection.prepared_statement(sql)
-      binds = [@parquet_glob, years_back, *all_evas, *from_evas, *to_evas]
+      binds = [@parquet_glob, *all_evas]
+      binds << years_back if years_back
+      binds.concat([*from_evas, *to_evas])
       binds.each_with_index { |v, i| stmt.bind(i + 1, v) }
 
       stmt.execute.map do |row|
@@ -84,6 +87,19 @@ module TrainDelayMetrics
           observations: row[4].to_i
         )
       end
+    end
+
+    # Returns [min_date, max_date] (Date objects) of the planned timestamps
+    # in the parquet glob, or [nil, nil] if there is no data.
+    def data_date_range
+      stmt = connection.prepared_statement(<<~SQL)
+        SELECT MIN(DATE(COALESCE(departure_planned_time, arrival_planned_time))) AS min_d,
+               MAX(DATE(COALESCE(departure_planned_time, arrival_planned_time))) AS max_d
+        FROM read_parquet(?)
+      SQL
+      stmt.bind(1, @parquet_glob)
+      row = stmt.execute.first
+      [row[0], row[1]]
     end
 
     private

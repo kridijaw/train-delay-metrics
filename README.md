@@ -61,10 +61,14 @@ Frankfurt (Main) Hbf     08098105      210  S
 ### Connections between two stations
 
 ```sh
+bundle exec bin/train-connections --from 08000105 --to 08000207
+# With explicit window:
 bundle exec bin/train-connections --from 08000105 --to 08000207 --years 3
 # Multiple EVAs (long-distance + S-Bahn platform groups, both ends):
-bundle exec bin/train-connections --from 08000105,08098105 --to 08000207,08098207 --years 3
+bundle exec bin/train-connections --from 08000105,08098105 --to 08000207,08098207
 ```
+
+If `--years` is omitted, the full dataset is used. The first line of output shows the actual window (e.g. `Window: 2024-07-01 -> 2026-04-30 (full dataset)`).
 
 ```
 Train       Dep    Arr    Days                         Obs
