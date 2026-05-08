@@ -122,4 +122,36 @@ RSpec.describe TrainDelayMetrics::Connections do
     )
     expect(names).to eq(["ICE 9"])
   end
+
+  it "trains_by_station lists trains per EVA, alphabetically, with --exclude-types respected" do
+    typed = File.join(tmpdir, "by_station.parquet")
+    DuckDB::Database.new.connect.execute(<<~SQL)
+      COPY (
+        SELECT * FROM (VALUES
+          -- Long-distance ICE 9 from 105 -> 207, also stops at 207 sibling 098207
+          ('ICE 9', 'ICE', 'Frankfurt Hbf', '08000105', 1, TIMESTAMP '2025-02-01 08:00', NULL,                          'ri', FALSE),
+          ('ICE 9', 'ICE', 'Köln Hbf',      '08000207', 3, NULL,                          TIMESTAMP '2025-02-01 10:00', 'ri', FALSE),
+          -- S 8 from S-Bahn EVAs
+          ('S 8',   'S',   'Frankfurt Hbf', '08098105', 1, TIMESTAMP '2025-02-01 08:00', NULL,                          'rs', FALSE),
+          ('S 8',   'S',   'Köln Hbf',      '08098207', 3, NULL,                          TIMESTAMP '2025-02-01 09:30', 'rs', FALSE),
+          -- FLX excluded by --exclude-types
+          ('FLX 1', 'FLX', 'Frankfurt Hbf', '08000105', 1, TIMESTAMP '2025-02-02 11:00', NULL,                          'rf', FALSE),
+          ('FLX 1', 'FLX', 'Köln Hbf',      '08000207', 3, NULL,                          TIMESTAMP '2025-02-02 12:00', 'rf', FALSE)
+        ) AS t(train_name, train_type, station_name, eva, train_line_station_num, departure_planned_time, arrival_planned_time, train_line_ride_id, is_canceled)
+      ) TO '#{typed}' (FORMAT PARQUET);
+    SQL
+
+    rows = described_class.new(parquet_glob: typed).trains_by_station(
+      from_eva: %w[08000105 08098105], to_eva: %w[08000207 08098207],
+      exclude_types: %w[FLX]
+    )
+
+    by_eva = rows.each_with_object({}) { |r, h| h[r.eva] = r }
+    expect(by_eva.keys).to contain_exactly("08000105", "08098105", "08000207", "08098207")
+    expect(by_eva["08000105"].station_name).to eq("Frankfurt Hbf")
+    expect(by_eva["08000105"].trains).to eq(["ICE 9"])
+    expect(by_eva["08098105"].trains).to eq(["S 8"])
+    expect(by_eva["08000207"].trains).to eq(["ICE 9"])
+    expect(by_eva["08098207"].trains).to eq(["S 8"])
+  end
 end

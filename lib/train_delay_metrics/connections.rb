@@ -42,6 +42,19 @@ module TrainDelayMetrics
       stmt.execute.map { |row| row[0] }
     end
 
+    StationTrains = Struct.new(:eva, :station_name, :trains, keyword_init: true)
+
+    # For each EVA in the union of from_eva/to_eva, returns the list of
+    # train_names (alphabetically sorted) that touch that EVA *and* connect
+    # any from-EVA to any to-EVA in the configured window.
+    def trains_by_station(from_eva:, to_eva:, years_back: nil, exclude_types: nil)
+      sql, binds = build_sql(from_eva: from_eva, to_eva: to_eva, years_back: years_back, exclude_types: exclude_types, select: :by_station)
+      stmt = bind(connection.prepared_statement(sql), binds)
+      stmt.execute.map do |row|
+        StationTrains.new(eva: row[0], station_name: row[1], trains: row[2] || [])
+      end
+    end
+
     # Returns [min_date, max_date] (Date objects) of the planned timestamps
     # in the parquet glob, or [nil, nil] if there is no data.
     def data_date_range
@@ -88,6 +101,27 @@ module TrainDelayMetrics
                     AND b.arr IS NOT NULL
                   ORDER BY a.train_name;
                 SQL
+              when :by_station
+                <<~SQL
+                  , matching_rides AS (
+                    SELECT DISTINCT a.train_line_ride_id, a.train_name
+                    FROM stops a JOIN stops b
+                      ON a.train_line_ride_id = b.train_line_ride_id
+                     AND b.arr >= a.dep
+                     AND b.arr <= a.dep + INTERVAL #{MAX_JOURNEY_HOURS} HOUR
+                    WHERE a.eva IN (#{from_placeholders})
+                      AND b.eva IN (#{to_placeholders})
+                      AND a.station_num < b.station_num
+                      AND a.dep IS NOT NULL
+                      AND b.arr IS NOT NULL
+                  )
+                  SELECT s.eva,
+                         any_value(s.station_name)                   AS station_name,
+                         list(DISTINCT m.train_name ORDER BY m.train_name) AS trains
+                  FROM stops s JOIN matching_rides m USING (train_line_ride_id)
+                  GROUP BY s.eva
+                  ORDER BY s.eva;
+                SQL
               when :full
                 <<~SQL
                   , pairs AS (
@@ -125,6 +159,7 @@ module TrainDelayMetrics
             eva,
             DATE(COALESCE(departure_planned_time, arrival_planned_time)) AS plan_date,
             any_value(train_name)             AS train_name,
+            #{select == :by_station ? "any_value(station_name)           AS station_name," : ""}
             any_value(train_line_station_num) AS station_num,
             any_value(departure_planned_time) AS dep,
             any_value(arrival_planned_time)   AS arr

@@ -104,6 +104,24 @@ bundle exec bin/get-trains --from 08000105 --to 08000207 --out trains.txt
 
 Prints an alphabetically sorted, deduplicated list of `train_name` values that connect the stations — no times, days, or counts. Accepts the same `--from`, `--to`, `--years`, `--exclude-types`, and `--data` options as `train-connections`. With `--out FILE` the list is written one-per-line; bare filenames land under `out/` (which is tracked but its contents are gitignored), paths with a directory component are used as-is. Without `--out`, names go to stdout below the `Window:` summary. Output files are consumable by `train-delay --train @FILE`.
 
+### List trains per station for a from/to journey
+
+```sh
+bundle exec bin/trains-by-station --from 08000105,08098105 --to 08000207,08098207
+bundle exec bin/trains-by-station --from 08000105,08098105 --to 08000207,08098207 --exclude-types FLX
+```
+
+For each EVA in the union of `--from` / `--to`, prints the alphabetically sorted list of trains that touch that EVA *and* connect any from-EVA to any to-EVA in the window. The `Side` column shows whether the EVA came from `--from`, `--to`, or both. Useful for figuring out which platform-group EVAs (e.g. S-Bahn `08098xxx` vs long-distance `08000xxx`) each train uses. `--exclude-types` drops train types like `FLX` (FlixTrain) before grouping.
+
+```
+EVA       Side     Station               Trains
+---------------------------------------------------------------------------------
+08000105  from     Frankfurt (Main) Hbf  IC 2241, IC 2341, …, ICE 928, NJ
+08098105  from     Frankfurt (Main) Hbf  S 1, S 8
+08000207  to       Köln Hbf              IC 2241, IC 2341, …, ICE 928, NJ
+08098207  to       Köln Hbf              S 1, S 8
+```
+
 ### Argument notes
 
 | flag                  | example         | meaning                                                      |
