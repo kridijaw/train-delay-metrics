@@ -72,7 +72,7 @@ module TrainDelayMetrics
         seen[n] ||= Result.new(train_name: n, total_trips: 0, delayed_trips: 0, delay_percentage: nil)
       end
 
-      seen.values.sort_by { |r| [r.delay_percentage ? -r.delay_percentage : Float::INFINITY, r.train_name] }
+      seen.values.sort_by { |r| [r.delay_percentage ? -r.delay_percentage : Float::INFINITY, TrainName.sort_key(r.train_name)] }
     end
 
     private

@@ -39,7 +39,7 @@ module TrainDelayMetrics
     def unique_train_names(from_eva:, to_eva:, years_back: nil, exclude_types: nil)
       sql, binds = build_sql(from_eva: from_eva, to_eva: to_eva, years_back: years_back, exclude_types: exclude_types, select: :names)
       stmt = bind(connection.prepared_statement(sql), binds)
-      stmt.execute.map { |row| row[0] }
+      stmt.execute.map { |row| row[0] }.sort_by { |n| TrainName.sort_key(n) }
     end
 
     StationTrains = Struct.new(:eva, :station_name, :trains, keyword_init: true)
@@ -51,7 +51,8 @@ module TrainDelayMetrics
       sql, binds = build_sql(from_eva: from_eva, to_eva: to_eva, years_back: years_back, exclude_types: exclude_types, select: :by_station)
       stmt = bind(connection.prepared_statement(sql), binds)
       stmt.execute.map do |row|
-        StationTrains.new(eva: row[0], station_name: row[1], trains: row[2] || [])
+        sorted = (row[2] || []).sort_by { |n| TrainName.sort_key(n) }
+        StationTrains.new(eva: row[0], station_name: row[1], trains: sorted)
       end
     end
 
