@@ -119,21 +119,43 @@ module TrainDelayMetrics
         [-evas.size, -from_count, -to_count, evas]
       end
 
-      term_w = terminal_width
-      sorted_groups.each_with_index do |evas, i|
-        trains = groups[evas].map(&:train_name).sort_by { |n| TrainName.sort_key(n) }
-        header = evas.map do |e|
-          side = []
-          side << "from" if from_set.include?(e)
-          side << "to"   if to_set.include?(e)
-          name = eva_to_name[e]
-          "#{e} #{name ? "(#{name}, #{side.join('/')})" : "(#{side.join('/')})"}"
-        end.join("  +  ")
+      side_for = ->(e) {
+        s = []
+        s << "from" if from_set.include?(e)
+        s << "to"   if to_set.include?(e)
+        s.join("/")
+      }
 
-        stdout.puts if i > 0
-        stdout.puts "Group: #{header}"
-        stdout.puts "  #{trains.size} train#{'s' unless trains.size == 1}:"
-        wrap_join(trains, ", ", [term_w - 4, 20].max).each { |l| stdout.puts "    #{l}" }
+      side_w    = [sorted_groups.flat_map { |g| g.map { |e| side_for.call(e).length } }.max, 4].max
+      eva_w     = 8 + 1 # trailing comma
+      station_w = [sorted_groups.flat_map { |g| g.map { |e| (eva_to_name[e] || "").length } }.max, 7].max
+      term_w    = terminal_width
+      prefix_w  = side_w + 2 + eva_w + 2 + station_w + 2
+      trains_w  = [term_w - prefix_w, 20].max
+
+      stdout.puts format("%-#{side_w}s  %-#{eva_w}s  %-#{station_w}s  %s", "Side", "EVA", "Station", "Trains")
+      stdout.puts "-" * [term_w, prefix_w + trains_w].min
+
+      sorted_groups.each_with_index do |evas, gi|
+        stdout.puts if gi > 0
+        trains = groups[evas].map(&:train_name).sort_by { |n| TrainName.sort_key(n) }
+        train_lines = wrap_join(trains, ", ", trains_w)
+
+        display_evas = evas.sort_by { |e| [from_set.include?(e) ? 0 : 1, e] }
+        rows = [display_evas.size, train_lines.size].max
+        rows.times do |i|
+          if i < display_evas.size
+            e = display_evas[i]
+            eva_cell = i == display_evas.size - 1 ? e : "#{e},"
+            side_cell    = side_for.call(e)
+            station_cell = eva_to_name[e].to_s
+          else
+            eva_cell = side_cell = station_cell = ""
+          end
+          train_cell = train_lines[i] || ""
+          stdout.puts format("%-#{side_w}s  %-#{eva_w}s  %-#{station_w}s  %s",
+                             side_cell, eva_cell, station_cell, train_cell)
+        end
       end
       0
     end
