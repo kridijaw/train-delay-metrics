@@ -30,15 +30,17 @@ module TrainDelayMetrics
   any to-EVA in the window. Useful for seeing which platform-group EVAs
   each train uses.}
         o.on("--from SPEC", "Origin EVA(s): comma-separated list or @FILE") do |v|
+          options[:from_spec] = v
           options[:from_evas] = parse_eva_spec(v, "--from", stderr) or return 1
         end
         o.on("--to SPEC",   "Destination EVA(s): comma-separated list or @FILE") do |v|
-          options[:to_evas] = parse_eva_spec(v, "--to", stderr) or return 1
+          options[:to_spec]  = v
+          options[:to_evas]  = parse_eva_spec(v, "--to", stderr) or return 1
         end
         o.on("--years N", Integer, "Years of history (default: all available data)") { |v| options[:years_back] = v }
         o.on("--exclude-types LIST", Array, %q{Exclude train_types (case-insensitive), e.g. --exclude-types FLX,DPF}) { |v| options[:exclude_types] = v }
         o.on("--group-by-stops", "Group trains by the exact set of from/to EVAs they touch instead of listing per EVA") { options[:group_by_stops] = true }
-        o.on("--out FILE", "Also write the EVAs↔trains mapping to FILE as JSON. Bare filenames are saved under #{OUT_DIR}/. Consumable by `train-delay --input`.") { |v| options[:out] = v }
+        o.on("--out [FILE]", "Also write the EVAs↔trains mapping to FILE as JSON. Without a value, derives FILE as <from>-to-<to>.json. Bare filenames are saved under #{OUT_DIR}/. Consumable by `train-delay --input`.") { |v| options[:out] = v || :auto }
         o.on("--data GLOB", "Parquet glob (default #{Query::DEFAULT_GLOB})") { |v| options[:parquet_glob] = v }
         o.on("-h", "--help") { stdout.puts o; return 0 }
       end
@@ -112,13 +114,29 @@ module TrainDelayMetrics
 
       if options[:out]
         groups = rows.map { |r| { "evas" => [r.eva], "trains" => r.trains } }
-        write_out(stdout, options[:out], groups)
+        write_out(stdout, resolve_out_path(options), groups)
       end
       0
     end
 
-    def self.write_out(stdout, out_path, groups)
-      path = out_path.include?(File::SEPARATOR) ? out_path : File.join(OUT_DIR, out_path)
+    def self.resolve_out_path(options)
+      arg = options[:out]
+      arg = derive_filename(options[:from_spec], options[:to_spec]) if arg == :auto
+      arg.include?(File::SEPARATOR) ? arg : File.join(OUT_DIR, arg)
+    end
+
+    def self.derive_filename(from_spec, to_spec)
+      "#{slug_spec(from_spec)}-to-#{slug_spec(to_spec)}.json"
+    end
+
+    def self.slug_spec(spec)
+      s = spec.to_s
+      s = s[1..] if s.start_with?("@")
+      s = File.basename(s, ".*") if s.include?(".")
+      s.gsub(/[^A-Za-z0-9]+/, "_").gsub(/^_+|_+$/, "")
+    end
+
+    def self.write_out(stdout, path, groups)
       FileUtils.mkdir_p(File.dirname(path))
       File.write(path, JSON.pretty_generate(groups) + "\n")
       total_trains = groups.sum { |g| g["trains"].size }
@@ -197,7 +215,7 @@ module TrainDelayMetrics
           trains = groups[evas].map(&:train_name).sort_by { |n| TrainName.sort_key(n) }
           { "evas" => evas, "trains" => trains }
         end
-        write_out(stdout, options[:out], json_groups)
+        write_out(stdout, resolve_out_path(options), json_groups)
       end
       0
     end

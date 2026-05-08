@@ -15,7 +15,7 @@ module TrainDelayMetrics
   PATTERN is a SQL ILIKE pattern, e.g. "berlin sp%" or "%frankfurt%".
   If you pass a bare word, it is wrapped as %word%.}
         o.on("--types LIST", Array, %q{Comma-separated train types to keep, e.g. "IC,ICE". Case-sensitive.}) { |v| options[:train_types] = v }
-        o.on("--out FILE", "Write the matching EVAs to FILE, one per line. Bare filenames are saved under #{OUT_DIR}/.") { |v| options[:out] = v }
+        o.on("--out [FILE]", "Write the matching EVAs to FILE, one per line. Without a value, derives FILE from PATTERN. Bare filenames are saved under #{OUT_DIR}/.") { |v| options[:out] = v || :auto }
         o.on("--data GLOB", "Parquet glob (default #{Query::DEFAULT_GLOB})") { |v| options[:parquet_glob] = v }
         o.on("-h", "--help") { stdout.puts o; return 0 }
       end
@@ -57,12 +57,19 @@ module TrainDelayMetrics
       stdout.puts "(#{rows.size} EVA#{'s' unless rows.size == 1})"
 
       if options[:out]
-        path = options[:out].include?(File::SEPARATOR) ? options[:out] : File.join(OUT_DIR, options[:out])
+        out_arg = options[:out] == :auto ? derive_filename(raw) : options[:out]
+        path = out_arg.include?(File::SEPARATOR) ? out_arg : File.join(OUT_DIR, out_arg)
         FileUtils.mkdir_p(File.dirname(path))
         File.write(path, rows.map(&:eva).join("\n") + "\n")
         stdout.puts "Wrote #{rows.size} EVA#{'s' unless rows.size == 1} to #{path}."
       end
       0
+    end
+
+    def self.derive_filename(pattern_raw)
+      slug = pattern_raw.to_s.gsub(/[^A-Za-z0-9]+/, "_").gsub(/^_+|_+$/, "")
+      slug = "stations" if slug.empty?
+      "#{slug}.txt"
     end
   end
 end
