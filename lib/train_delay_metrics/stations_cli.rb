@@ -1,17 +1,21 @@
+require "fileutils"
 require "optparse"
 require_relative "stations"
 
 module TrainDelayMetrics
   class StationsCLI
+    OUT_DIR = "out".freeze
+
     def self.run(argv, stdout: $stdout, stderr: $stderr)
-      options = { parquet_glob: Query::DEFAULT_GLOB, train_types: [] }
+      options = { parquet_glob: Query::DEFAULT_GLOB, train_types: [], out: nil }
 
       parser = OptionParser.new do |o|
-        o.banner = %{Usage: train-stations PATTERN [options]
+        o.banner = %{Usage: find-train-stations PATTERN [options]
 
   PATTERN is a SQL ILIKE pattern, e.g. "berlin sp%" or "%frankfurt%".
   If you pass a bare word, it is wrapped as %word%.}
         o.on("--types LIST", Array, %q{Comma-separated train types to keep, e.g. "IC,ICE". Case-sensitive.}) { |v| options[:train_types] = v }
+        o.on("--out FILE", "Write the matching EVAs to FILE, one per line. Bare filenames are saved under #{OUT_DIR}/.") { |v| options[:out] = v }
         o.on("--data GLOB", "Parquet glob (default #{Query::DEFAULT_GLOB})") { |v| options[:parquet_glob] = v }
         o.on("-h", "--help") { stdout.puts o; return 0 }
       end
@@ -47,6 +51,13 @@ module TrainDelayMetrics
                            r.station_name, r.eva, r.trains, r.train_types.join(", "))
       end
       stdout.puts "(#{rows.size} EVA#{'s' unless rows.size == 1})"
+
+      if options[:out]
+        path = options[:out].include?(File::SEPARATOR) ? options[:out] : File.join(OUT_DIR, options[:out])
+        FileUtils.mkdir_p(File.dirname(path))
+        File.write(path, rows.map(&:eva).join("\n") + "\n")
+        stdout.puts "Wrote #{rows.size} EVA#{'s' unless rows.size == 1} to #{path}."
+      end
       0
     end
   end

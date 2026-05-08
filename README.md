@@ -53,9 +53,10 @@ bundle exec bin/train-delay --train @trains.txt --station 08000207 --threshold-m
 ### Look up a station's EVA(s) and train types
 
 ```sh
-bundle exec bin/train-stations frankfurt
-bundle exec bin/train-stations "berlin sp%"
-bundle exec bin/train-stations frankfurt --types IC,ICE   # only EVAs with IC/ICE service
+bundle exec bin/find-train-stations frankfurt
+bundle exec bin/find-train-stations "berlin sp%"
+bundle exec bin/find-train-stations frankfurt --types IC,ICE   # only EVAs with IC/ICE service
+bundle exec bin/find-train-stations frankfurt --types IC,ICE --out frankfurt-evas.txt   # save EVAs to out/
 ```
 
 ```
