@@ -1,0 +1,9 @@
+/data/
+/.bundle/
+/.claude/
+/tmp/
+*.duckdb
+*.duckdb.wal
+.DS_Store
+Gemfile.lock
+.rspec_status
