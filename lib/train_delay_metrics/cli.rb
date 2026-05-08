@@ -42,9 +42,9 @@ module TrainDelayMetrics
           if v == "all"
             options[:input_all] = true
           else
-            path = FileInput.resolve(v)
+            path = FileInput.resolve(v, prefix: "tbs_", extension: ".json")
             unless path
-              stderr.puts "Input file not found: #{v} (also tried out/#{v})"
+              stderr.puts "Input file not found: #{v} (also tried out/, tbs_<name>, tbs_<name>.json)"
               return 1
             end
             options[:input_file] = path

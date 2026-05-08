@@ -288,14 +288,16 @@ module TrainDelayMetrics
     end
 
     # Parses a --from / --to value: either a comma-separated EVA list or
-    # @FILE (file path resolved literally first, then under out/).
+    # @FILE. @FILE resolves literally first, then under out/, then with the
+    # `station_` prefix and `.txt` extension applied so e.g. `@berlin`
+    # resolves to `out/station_berlin.txt`.
     # Returns the EVA array on success or nil after printing an error.
     def self.parse_eva_spec(value, flag, stderr)
       if value.start_with?("@")
         raw  = value[1..]
-        path = FileInput.resolve(raw)
+        path = FileInput.resolve(raw, prefix: "station_", extension: ".txt")
         unless path
-          stderr.puts "#{flag} file not found: #{raw} (also tried out/#{raw})"
+          stderr.puts "#{flag} file not found: #{raw} (also tried out/, station_<name>, station_<name>.txt)"
           return nil
         end
         FileInput.read_lines(path)
