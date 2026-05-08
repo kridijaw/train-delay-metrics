@@ -41,9 +41,14 @@ Trips canceled:                  29
 Trips delayed >= 20 min:         146
 Delay probability:               23.51%
 Delay-or-cancel probability:     27.08%
+Peak window (±30m):              20:51 (27.48%, 180 of 655)
 ```
 
-`Total trips` counts only trips that actually ran. `Trips canceled` is reported alongside as a separate failure mode (it is not folded into `Delay probability`). `Delay-or-cancel probability` is `(delayed + canceled) / (total + canceled)` — the share of *scheduled* trips that either ran late or didn't run at all. The multi-train table adds matching `Cancel` and `Prob%+C` columns.
+`Total trips` counts only trips that actually ran. `Trips canceled` is reported alongside as a separate failure mode (it is not folded into `Delay probability`). `Delay-or-cancel probability` is `(delayed + canceled) / (total + canceled)` — the share of *scheduled* trips that either ran late or didn't run at all.
+
+`Peak window (±30m)` is the time-of-day (centered on an observed `departure_planned_time` minute) where the train accumulated the most disruptions (delayed ≥ threshold OR canceled), summed over a ±30 minute span. Ranking is by absolute disruption count (not rate), so a single 100%-disrupted run at an off-hour can't win. The reported percentage is `disrupted / scheduled` inside that window. The window does not wrap across midnight.
+
+The multi-train table adds matching `Cancel`, `Prob%+C`, and `Peak D+C` columns (the table cell is the compact `HH:MM NN%` form).
 
 With multiple `--train` values the output switches to a compact table sorted by delay probability descending. Trains with no observed trips in the window are omitted.
 

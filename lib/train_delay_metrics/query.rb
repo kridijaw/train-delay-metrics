@@ -13,6 +13,16 @@ module TrainDelayMetrics
       end
     end
 
+    # Time-of-day window (centered on a departure minute, ±30 min) where the
+    # train accumulated the most disruptions (delay >= threshold OR canceled).
+    # Ranked by absolute disrupted count to avoid single-flier 100% windows;
+    # ties broken by rate, then earliest center.
+    PeakWindow = Struct.new(:center_minute, :scheduled, :disrupted, :percentage, keyword_init: true) do
+      def center_hhmm
+        format("%02d:%02d", center_minute / 60, center_minute % 60)
+      end
+    end
+
     DEFAULT_GLOB = "data/deutsche_bahn/*.parquet".freeze
 
     # Schema reference (piebro/deutsche-bahn-data, monthly_processed_data):
@@ -94,6 +104,83 @@ module TrainDelayMetrics
       end
 
       seen.values.sort_by { |r| [r.delay_percentage ? -r.delay_percentage : Float::INFINITY, TrainName.sort_key(r.train_name)] }
+    end
+
+    # Returns { train_name => PeakWindow }. For each train, the window is the
+    # ±30-minute span around an observed departure minute that contains the
+    # greatest number of disruption events. Trains with no data — or with no
+    # rows that have departure_planned_time at the queried EVA — are absent
+    # from the hash. Windows do not wrap across midnight (a 23:50 center sees
+    # 23:20–24:00 only); sample sizes there are tiny so this is rarely the
+    # peak window in practice.
+    def peak_windows(train_names:, station_eva: nil, station_evas: nil, threshold_minutes:, years_back:)
+      names = Array(train_names).map(&:to_s).reject(&:empty?)
+      raise ArgumentError, "train_names must not be empty" if names.empty?
+
+      evas = Array(station_evas).map(&:to_s).reject(&:empty?)
+      evas = [station_eva.to_s] if evas.empty? && station_eva
+      raise ArgumentError, "station_eva or station_evas must be provided" if evas.empty?
+
+      train_placeholders = (["?"] * names.size).join(", ")
+      eva_placeholders   = (["?"] * evas.size).join(", ")
+
+      sql = <<~SQL
+        WITH per_min AS (
+          SELECT train_name,
+                 (EXTRACT(HOUR FROM departure_planned_time) * 60
+                  + EXTRACT(MINUTE FROM departure_planned_time))::INTEGER AS dep_min,
+                 COUNT(*)                                                                  AS scheduled,
+                 COUNT(*) FILTER (WHERE is_canceled OR delay_in_min >= ?)                  AS disrupted
+          FROM read_parquet(?)
+          WHERE train_name IN (#{train_placeholders})
+            AND eva IN (#{eva_placeholders})
+            AND departure_planned_time IS NOT NULL
+            AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 YEAR) * ?
+          GROUP BY train_name, dep_min
+        ),
+        windowed AS (
+          SELECT a.train_name,
+                 a.dep_min                AS center_min,
+                 SUM(b.scheduled)         AS w_scheduled,
+                 SUM(b.disrupted)         AS w_disrupted
+          FROM per_min a
+          JOIN per_min b
+            ON a.train_name = b.train_name
+           AND b.dep_min BETWEEN a.dep_min - 30 AND a.dep_min + 30
+          GROUP BY a.train_name, a.dep_min
+        ),
+        ranked AS (
+          SELECT train_name, center_min, w_scheduled, w_disrupted,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY train_name
+                   ORDER BY w_disrupted DESC,
+                            CASE WHEN w_scheduled = 0 THEN 0
+                                 ELSE w_disrupted::DOUBLE / w_scheduled END DESC,
+                            center_min ASC
+                 ) AS rn
+          FROM windowed
+        )
+        SELECT train_name, center_min, w_scheduled, w_disrupted
+        FROM ranked
+        WHERE rn = 1
+      SQL
+
+      stmt = connection.prepared_statement(sql)
+      binds = [threshold_minutes, @parquet_glob, *names, *evas, years_back]
+      binds.each_with_index { |v, i| stmt.bind(i + 1, v) }
+
+      out = {}
+      stmt.execute.each do |row|
+        sched = row[2].to_i
+        disrupt = row[3].to_i
+        out[row[0]] = PeakWindow.new(
+          center_minute: row[1].to_i,
+          scheduled:     sched,
+          disrupted:     disrupt,
+          percentage:    sched.zero? ? nil : 100.0 * disrupt / sched
+        )
+      end
+      out
     end
 
     private
