@@ -9,6 +9,7 @@ module TrainDelayMetrics
         years_back:    nil,
         unique:        false,
         exclude_types: [],
+        out:           nil,
         parquet_glob:  Query::DEFAULT_GLOB
       }
 
@@ -19,6 +20,7 @@ module TrainDelayMetrics
         o.on("--years N", Integer, "Years of history (default: all available data)") { |v| options[:years_back] = v }
         o.on("--unique", "Print only an alphabetically sorted, deduplicated list of train names (no times/days/obs)") { options[:unique] = true }
         o.on("--exclude-types LIST", Array, %q{Exclude train_types (case-insensitive), e.g. --exclude-types FLX,DPF}) { |v| options[:exclude_types] = v }
+        o.on("--out FILE", "Write the --unique train-name list to FILE, one per line (stdout still shows the window summary). Ignored without --unique.") { |v| options[:out] = v }
         o.on("--data GLOB", "Parquet glob (default #{Query::DEFAULT_GLOB})") { |v| options[:parquet_glob] = v }
         o.on("-h", "--help") { stdout.puts o; return 0 }
       end
@@ -58,8 +60,17 @@ module TrainDelayMetrics
           stdout.puts "No connections found from #{options[:from_evas].join(',')} to #{options[:to_evas].join(',')}."
           return 0
         end
-        names.each { |n| stdout.puts n }
+        if options[:out]
+          File.write(options[:out], names.join("\n") + "\n")
+          stdout.puts "Wrote #{names.size} train names to #{options[:out]}."
+        else
+          names.each { |n| stdout.puts n }
+        end
         return 0
+      end
+
+      if options[:out]
+        stderr.puts "--out is only used with --unique; ignoring."
       end
 
       rows = svc.run(

@@ -27,7 +27,10 @@ RSpec.describe TrainDelayMetrics::Query do
           ('ICE 802', '8000105', 20, CURRENT_TIMESTAMP - INTERVAL 200 DAY, FALSE),
           ('ICE 802', '8000105',  5, CURRENT_TIMESTAMP - INTERVAL  20 DAY, FALSE),
           ('ICE 802', '8000105',  0, CURRENT_TIMESTAMP - INTERVAL  30 DAY, FALSE),
+          -- ICE 999: one delayed trip (always delayed) → 100% delay rate
           ('ICE 999', '8000105', 99, CURRENT_TIMESTAMP - INTERVAL  10 DAY, FALSE),
+          -- ICE 555: one trip, never delayed → 0%
+          ('ICE 555', '8000105',  2, CURRENT_TIMESTAMP - INTERVAL   5 DAY, FALSE),
           ('ICE 802', '8000001', 99, CURRENT_TIMESTAMP - INTERVAL  10 DAY, FALSE),
           ('ICE 802', '8000105', 99, NULL,                                FALSE),
           ('ICE 802', '8000105', 99, CURRENT_TIMESTAMP - INTERVAL  10 DAY, TRUE),
@@ -59,5 +62,21 @@ RSpec.describe TrainDelayMetrics::Query do
     expect(result.total_trips).to eq(0)
     expect(result.delayed_trips).to eq(0)
     expect(result.delay_percentage).to be_nil
+  end
+
+  it "run_many returns multiple trains sorted by delay probability descending" do
+    results = described_class.new(parquet_glob: glob).run_many(
+      train_names: ["ICE 802", "ICE 999", "ICE 555", "ICE 0000"],
+      station_eva: "8000105",
+      threshold_minutes: 20, years_back: 3
+    )
+
+    expect(results.map(&:train_name)).to eq(["ICE 999", "ICE 802", "ICE 555", "ICE 0000"])
+    # ICE 999 100%, ICE 802 60%, ICE 555 0%, ICE 0000 nil (last)
+    expect(results[0].delay_percentage).to be_within(0.001).of(100.0)
+    expect(results[1].delay_percentage).to be_within(0.001).of(60.0)
+    expect(results[2].delay_percentage).to be_within(0.001).of(0.0)
+    expect(results[3].delay_percentage).to be_nil
+    expect(results[3].total_trips).to eq(0)
   end
 end

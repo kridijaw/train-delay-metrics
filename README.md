@@ -31,13 +31,17 @@ Files land in `data/deutsche_bahn/`. Re-runs are idempotent. Months that don't e
 
 ```sh
 bundle exec bin/train-delay --train "ICE 821" --station 08000105 --threshold-minutes 20 --years 3
+# Multiple trains, sorted by delay probability (high to low):
+bundle exec bin/train-delay --train "ICE 821,ICE 825,ICE 824" --station 08000105 --threshold-minutes 20
 ```
 
 ```
-Total trips:                     29
-Trips delayed >= 20 min:         5
-Delay probability:               17.24%
+Total trips:                     621
+Trips delayed >= 20 min:         146
+Delay probability:               23.51%
 ```
+
+With multiple `--train` values the output switches to a compact table sorted by delay probability descending; trains with no data appear last with `-`.
 
 ### Look up a station's EVA(s) and train types
 
@@ -73,6 +77,13 @@ If `--years` is omitted, the full dataset is used. The first line of output show
 `--exclude-types LIST` drops rides whose `train_type` matches any of the listed values, case-insensitive (e.g. `--exclude-types FLX,DPF` to ignore FlixTrain and charter services).
 
 `--unique` prints just an alphabetically sorted, deduplicated list of train names that connect the two stations — no times, days, or counts. Useful when you only care which trains exist on the route.
+
+`--out FILE` (only with `--unique`) writes the train-name list to `FILE` (one per line) instead of stdout. The output file is consumable by `train-delay --train @FILE`:
+
+```sh
+bundle exec bin/train-connections --from 08011160,08098160 --to 08000105,08098105 --unique --out trains.txt
+bundle exec bin/train-delay --train @trains.txt --station 08000105 --threshold-minutes 20
+```
 
 ```
 Train       Dep    Arr    Days                         Obs

@@ -2,7 +2,7 @@ require "duckdb"
 
 module TrainDelayMetrics
   class Query
-    Result = Struct.new(:total_trips, :delayed_trips, :delay_percentage, keyword_init: true)
+    Result = Struct.new(:train_name, :total_trips, :delayed_trips, :delay_percentage, keyword_init: true)
 
     DEFAULT_GLOB = "data/deutsche_bahn/*.parquet".freeze
 
@@ -12,20 +12,6 @@ module TrainDelayMetrics
     #   delay_in_min            integer minutes
     #   arrival_planned_time    timestamp (NULL for stops with no arrival, e.g. origin)
     #   is_canceled             bool
-    SQL = <<~SQL.freeze
-      SELECT
-        COUNT(*)                                                       AS total_trips,
-        COUNT(*) FILTER (WHERE delay_in_min >= ?)                      AS delayed_trips,
-        CASE WHEN COUNT(*) = 0 THEN NULL
-             ELSE 100.0 * COUNT(*) FILTER (WHERE delay_in_min >= ?) / COUNT(*)
-        END                                                            AS delay_percentage
-      FROM read_parquet(?)
-      WHERE train_name = ?
-        AND eva = ?
-        AND arrival_planned_time IS NOT NULL
-        AND is_canceled = FALSE
-        AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 YEAR) * ?
-    SQL
 
     def initialize(parquet_glob: DEFAULT_GLOB, connection: nil)
       @parquet_glob = parquet_glob
@@ -33,20 +19,60 @@ module TrainDelayMetrics
     end
 
     def run(train_name:, station_eva:, threshold_minutes:, years_back:)
-      stmt = connection.prepared_statement(SQL)
-      stmt.bind(1, threshold_minutes)
-      stmt.bind(2, threshold_minutes)
-      stmt.bind(3, @parquet_glob)
-      stmt.bind(4, train_name.to_s)
-      stmt.bind(5, station_eva.to_s)
-      stmt.bind(6, years_back)
-
-      row = stmt.execute.first
-      Result.new(
-        total_trips:      row[0].to_i,
-        delayed_trips:    row[1].to_i,
-        delay_percentage: row[2]&.to_f
+      results = run_many(
+        train_names:       [train_name],
+        station_eva:       station_eva,
+        threshold_minutes: threshold_minutes,
+        years_back:        years_back
       )
+      results.first || Result.new(train_name: train_name.to_s, total_trips: 0, delayed_trips: 0, delay_percentage: nil)
+    end
+
+    # Computes delay statistics for one or more trains at the same station.
+    # Returns an array of Result, ordered by delay_percentage DESC (NULL last).
+    def run_many(train_names:, station_eva:, threshold_minutes:, years_back:)
+      names = Array(train_names).map(&:to_s).reject(&:empty?)
+      raise ArgumentError, "train_names must not be empty" if names.empty?
+
+      placeholders = (["?"] * names.size).join(", ")
+
+      sql = <<~SQL
+        SELECT train_name,
+               COUNT(*)                                                  AS total_trips,
+               COUNT(*) FILTER (WHERE delay_in_min >= ?)                 AS delayed_trips,
+               CASE WHEN COUNT(*) = 0 THEN NULL
+                    ELSE 100.0 * COUNT(*) FILTER (WHERE delay_in_min >= ?) / COUNT(*)
+               END                                                       AS delay_percentage
+        FROM read_parquet(?)
+        WHERE train_name IN (#{placeholders})
+          AND eva = ?
+          AND arrival_planned_time IS NOT NULL
+          AND is_canceled = FALSE
+          AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 YEAR) * ?
+        GROUP BY train_name
+      SQL
+
+      stmt = connection.prepared_statement(sql)
+      binds = [threshold_minutes, threshold_minutes, @parquet_glob, *names, station_eva.to_s, years_back]
+      binds.each_with_index { |v, i| stmt.bind(i + 1, v) }
+
+      seen = {}
+      stmt.execute.each do |row|
+        seen[row[0]] = Result.new(
+          train_name:       row[0],
+          total_trips:      row[1].to_i,
+          delayed_trips:    row[2].to_i,
+          delay_percentage: row[3]&.to_f
+        )
+      end
+
+      # Include zero-row results for trains that had no matching data so the
+      # caller can see they were checked.
+      names.each do |n|
+        seen[n] ||= Result.new(train_name: n, total_trips: 0, delayed_trips: 0, delay_percentage: nil)
+      end
+
+      seen.values.sort_by { |r| [r.delay_percentage ? -r.delay_percentage : Float::INFINITY, r.train_name] }
     end
 
     private
