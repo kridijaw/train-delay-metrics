@@ -39,6 +39,22 @@ Trips delayed >= 20 min:         5
 Delay probability:               17.24%
 ```
 
+### Look up a station's EVA(s) and train types
+
+```sh
+bundle exec bin/train-stations frankfurt
+bundle exec bin/train-stations "berlin sp%"
+```
+
+```
+Station                  EVA       Rows       Train types
+Frankfurt (Main) Hbf     08000105    744141  Bus, EC, ECE, EN, HLB, IC, ICE, NJ, RB, RE, S, …
+Frankfurt (Main) Hbf     08098105    539301  S
+...
+```
+
+`PATTERN` is a SQL ILIKE pattern (`%` wildcards). A bare word is wrapped as `%word%`. The same physical station often has multiple EVAs — typically `08089xxx` / `08098xxx` for S-Bahn platforms and `0801xxxx` / `0800xxxx` for long-distance/regional.
+
 ### Connections between two stations
 
 ```sh
