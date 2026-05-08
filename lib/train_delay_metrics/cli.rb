@@ -38,13 +38,17 @@ module TrainDelayMetrics
           end
         end
         o.on("--station EVA",  "EVA station number, e.g. 8000105 (Frankfurt Hbf)") { |v| options[:station_eva] = v }
-        o.on("--input FILE",   "JSON file from `trains-by-station --out` (bare names also resolved against out/). Replaces --train/--station.") do |v|
-          path = FileInput.resolve(v)
-          unless path
-            stderr.puts "Input file not found: #{v} (also tried out/#{v})"
-            return 1
+        o.on("--input FILE",   %q{JSON file from `trains-by-station --out` (bare names also resolved against out/). Use "all" to run every out/tbs_*.json. Replaces --train/--station.}) do |v|
+          if v == "all"
+            options[:input_all] = true
+          else
+            path = FileInput.resolve(v)
+            unless path
+              stderr.puts "Input file not found: #{v} (also tried out/#{v})"
+              return 1
+            end
+            options[:input_file] = path
           end
-          options[:input_file] = path
         end
         o.on("--threshold-minutes N", Integer, "Delay threshold in minutes (default 20)") { |v| options[:threshold_minutes] = v }
         o.on("--years N", Integer, "Years of history to consider (default 3)") { |v| options[:years_back] = v }
@@ -57,7 +61,7 @@ module TrainDelayMetrics
       end
       parser.parse!(argv)
 
-      if options[:input_file]
+      if options[:input_file] || options[:input_all]
         if !options[:train_names].empty? || options[:station_eva]
           stderr.puts "--input cannot be combined with --train/--station."
           return 1
@@ -79,6 +83,21 @@ module TrainDelayMetrics
       end
 
       query = Query.new(parquet_glob: options[:parquet_glob])
+
+      if options[:input_all]
+        files = Dir.glob(File.join("out", "tbs_*.json")).sort
+        if files.empty?
+          stderr.puts %{--input all: no out/tbs_*.json files found. Run trains-by-station --out first.}
+          return 1
+        end
+        files.each_with_index do |f, i|
+          stdout.puts if i > 0
+          stdout.puts "=== #{File.basename(f)} ==="
+          rc = run_input(stdout, stderr, query, options.merge(input_file: f))
+          return rc unless rc == 0
+        end
+        return 0
+      end
 
       if options[:input_file]
         return run_input(stdout, stderr, query, options)

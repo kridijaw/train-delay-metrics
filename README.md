@@ -43,7 +43,7 @@ Delay probability:               23.51%
 
 With multiple `--train` values the output switches to a compact table sorted by delay probability descending. Trains with no observed trips in the window are omitted.
 
-`--input FILE` replaces both `--train` and `--station`: it reads a JSON file written by `trains-by-station --out` (bare names resolved against `out/`) and runs the delay query once per `{evas, trains}` group, measuring delay at any of the group's EVAs.
+`--input FILE` replaces both `--train` and `--station`: it reads a JSON file written by `trains-by-station --out` (bare names resolved against `out/`) and runs the delay query once per `{evas, trains}` group, measuring delay at any of the group's EVAs. Pass `--input all` to iterate every `out/tbs_*.json` file (the auto-derived names from `trains-by-station --out`), printing a header per file.
 
 `--train` also accepts `@FILE` to read newline-separated train names from a file — for example a list produced by `bin/get-trains --out`. Bare filenames are resolved against the current directory first, then against `out/`, so a file written by `get-trains` round-trips without retyping the path:
 
