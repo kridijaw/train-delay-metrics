@@ -27,17 +27,34 @@ Files land in `data/deutsche_bahn/`. Re-runs are idempotent. Months that don't e
 
 ## Run
 
+### Delay frequency for one train at one station
+
 ```sh
 bundle exec bin/train-delay --train "ICE 821" --station 08000105 --threshold-minutes 20 --years 3
 ```
-
-Output:
 
 ```
 Total trips:                     29
 Trips delayed >= 20 min:         5
 Delay probability:               17.24%
 ```
+
+### Connections between two stations
+
+```sh
+bundle exec bin/train-connections --from 08000105 --to 08000207 --years 3
+```
+
+```
+Train       Dep    Arr    Days                         Obs
+----------------------------------------------------------
+ICE 222     04:31  06:38  Mon Tue Wed Thu Fri          5
+NJ          03:13  05:57  Mon Tue Wed Thu Fri Sat Sun  211
+ICE 824     07:09  09:43  Wed Sat                      2
+...
+```
+
+Each row is a unique `(train_name, planned departure, planned arrival)` triple. `Days` lists the weekdays it was observed running; `Obs` counts observed runs in the window. Real-world planned-time edits across months can produce multiple rows for what is logically the same service.
 
 ### Argument notes
 
