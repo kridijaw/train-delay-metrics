@@ -128,6 +128,19 @@ bundle exec bin/trains-by-station --from 08000105,08098105 --to 08000207,0809820
 
 Either side can also be the literal `all`, which expands to every `out/station_*.txt` file. Combined with the other side it iterates the cartesian product, skipping pairs where from and to are the same file. With `--out` (auto-derived), each pair writes its own JSON file. Useful for batch-generating delay queries across many station combinations.
 
+`--input FILE` replaces `--from`/`--to` and reads pairs from FILE, one per line as `<from_spec>, <to_spec>` (or `<from_spec> -> <to_spec>` if a spec itself needs an internal comma, e.g. `08000105,08098105 -> 08000207`). Each spec is anything `--from`/`--to` accepts (single EVA, comma-separated list, or `@FILE`). Blank lines and `#` comments are ignored; bare filenames resolve under `out/`:
+
+```
+# out/journeys.txt
+@berlin, @koeln
+@berlin, @regensburg
+08000105,08098105 -> 08000207
+```
+
+```sh
+bundle exec bin/trains-by-station --input journeys.txt --years 1 --group-by-stops --out
+```
+
 ```sh
 bundle exec bin/find-train-stations berlin --types ICE --out
 bundle exec bin/find-train-stations regensburg --types ICE --out

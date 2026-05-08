@@ -45,6 +45,15 @@ module TrainDelayMetrics
             options[:to_evas] = parse_eva_spec(v, "--to", stderr) or return 1
           end
         end
+        o.on("--input FILE", %q{Read pairs from FILE, one per line as "<from_spec>, <to_spec>" (or "<from_spec> -> <to_spec>"). Each spec is anything --from/--to accepts (single EVA, comma-separated list, or @FILE). Bare filenames are resolved against out/. Replaces --from/--to.}) do |v|
+          raw  = v.delete_prefix("@")
+          path = FileInput.resolve(raw)
+          unless path
+            stderr.puts "Input file not found: #{raw} (also tried out/#{raw})"
+            return 1
+          end
+          options[:input_file] = path
+        end
         o.on("--years N", Integer, "Years of history (default: all available data)") { |v| options[:years_back] = v }
         o.on("--exclude-types LIST", Array, %q{Exclude train_types (case-insensitive), e.g. --exclude-types FLX,DPF}) { |v| options[:exclude_types] = v }
         o.on("--group-by-stops", "Group trains by the exact set of from/to EVAs they touch instead of listing per EVA") { options[:group_by_stops] = true }
@@ -58,15 +67,22 @@ module TrainDelayMetrics
       end
       parser.parse!(argv)
 
-      from_missing = options[:from_spec].nil?
-      to_missing   = options[:to_spec].nil?
-      if from_missing || to_missing
-        missing = []
-        missing << "--from" if from_missing
-        missing << "--to"   if to_missing
-        stderr.puts "Missing required option(s): #{missing.join(', ')}"
-        stderr.puts parser
-        return 1
+      if options[:input_file]
+        if options[:from_spec] || options[:to_spec]
+          stderr.puts "--input cannot be combined with --from/--to."
+          return 1
+        end
+      else
+        from_missing = options[:from_spec].nil?
+        to_missing   = options[:to_spec].nil?
+        if from_missing || to_missing
+          missing = []
+          missing << "--from" if from_missing
+          missing << "--to"   if to_missing
+          stderr.puts "Missing required option(s): #{missing.join(', ')} (or use --input FILE)"
+          stderr.puts parser
+          return 1
+        end
       end
 
       if Dir.glob(options[:parquet_glob]).empty?
@@ -85,9 +101,14 @@ module TrainDelayMetrics
         end
       window_line = "Window: #{window_from} -> #{window_to}#{options[:years_back] ? " (--years #{options[:years_back]})" : " (full dataset)"}"
 
-      from_specs = expand_specs(options, :from, stderr) or return 1
-      to_specs   = expand_specs(options, :to, stderr) or return 1
-      pairs = from_specs.product(to_specs).reject { |f, t| f == t }
+      pairs =
+        if options[:input_file]
+          parse_input_pairs(options[:input_file], stderr) or return 1
+        else
+          from_specs = expand_specs(options, :from, stderr) or return 1
+          to_specs   = expand_specs(options, :to, stderr) or return 1
+          from_specs.product(to_specs).reject { |f, t| f == t }
+        end
 
       if pairs.empty?
         stderr.puts "No from/to pairs to run (after skipping equal pairs)."
@@ -109,6 +130,41 @@ module TrainDelayMetrics
         run_one(stdout, svc, per_options)
       end
       0
+    end
+
+    # Parses an --input pair-list file. One pair per line:
+    #   <from_spec>, <to_spec>
+    #   <from_spec> -> <to_spec>
+    # Each spec is anything --from / --to accepts. Lines starting with `#`
+    # and blank lines are ignored. The " -> " form is preferred when a spec
+    # itself needs an internal comma (e.g. "08000105,08098105 -> 08000207"),
+    # since the simple form splits on the first comma. Returns the parsed
+    # array of [from_spec, to_spec] pairs, or nil after printing an error.
+    def self.parse_input_pairs(path, stderr)
+      pairs = []
+      File.foreach(path, chomp: true).each_with_index do |raw, idx|
+        line = raw.strip
+        next if line.empty? || line.start_with?("#")
+
+        if line.include?(" -> ")
+          from_spec, to_spec = line.split(" -> ", 2).map(&:strip)
+        else
+          comma = line.index(",")
+          if comma.nil?
+            stderr.puts "#{path}:#{idx + 1}: missing separator (expected '<from>, <to>' or '<from> -> <to>')"
+            return nil
+          end
+          from_spec = line[0...comma].strip
+          to_spec   = line[(comma + 1)..].strip
+        end
+
+        if from_spec.empty? || to_spec.empty?
+          stderr.puts "#{path}:#{idx + 1}: empty from or to spec"
+          return nil
+        end
+        pairs << [from_spec, to_spec]
+      end
+      pairs
     end
 
     # Returns [spec, ...] for the given side; if --<side> all was passed,
