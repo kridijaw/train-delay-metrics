@@ -62,6 +62,8 @@ Frankfurt (Main) Hbf     08098105      210  S
 
 ```sh
 bundle exec bin/train-connections --from 08000105 --to 08000207 --years 3
+# Multiple EVAs (long-distance + S-Bahn platform groups, both ends):
+bundle exec bin/train-connections --from 08000105,08098105 --to 08000207,08098207 --years 3
 ```
 
 ```

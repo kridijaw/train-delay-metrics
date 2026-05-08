@@ -28,7 +28,10 @@ RSpec.describe TrainDelayMetrics::Connections do
           ('IC 200', '08000207',3,NULL,                          TIMESTAMP '2025-01-04 14:00','r2', FALSE),
           -- Reverse direction (excluded: station_num decreases)
           ('ICE 100','08000207',3,TIMESTAMP '2025-01-08 18:00', NULL,                   'r1', FALSE),
-          ('ICE 100','08000105',1,NULL,                          TIMESTAMP '2025-01-08 20:00','r1', FALSE)
+          ('ICE 100','08000105',1,NULL,                          TIMESTAMP '2025-01-08 20:00','r1', FALSE),
+          -- S-Bahn pairs at sibling EVAs (08098105 -> 08098207)
+          ('S 1',   '08098105',1,TIMESTAMP '2025-01-09 09:00', NULL,                   'r3', FALSE),
+          ('S 1',   '08098207',3,NULL,                          TIMESTAMP '2025-01-09 09:30','r3', FALSE)
         ) AS t(train_name, eva, train_line_station_num, departure_planned_time, arrival_planned_time, train_line_ride_id, is_canceled)
       ) TO '#{parquet}' (FORMAT PARQUET);
     SQL
@@ -59,5 +62,16 @@ RSpec.describe TrainDelayMetrics::Connections do
       from_eva: "08000105", to_eva: "08000888", years_back: 3
     )
     expect(rows).to be_empty
+  end
+
+  it "accepts arrays of EVAs for from and to" do
+    rows = described_class.new(parquet_glob: glob).run(
+      from_eva: %w[08000105 08098105],
+      to_eva:   %w[08000207 08098207],
+      years_back: 3
+    )
+
+    train_names = rows.map(&:train_name)
+    expect(train_names).to contain_exactly("ICE 100", "IC 200", "S 1")
   end
 end
