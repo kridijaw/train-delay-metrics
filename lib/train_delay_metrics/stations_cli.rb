@@ -40,11 +40,11 @@ module TrainDelayMetrics
 
       name_w = [rows.map { |r| r.station_name.to_s.length }.max, 14].max
       eva_w  = [rows.map { |r| r.eva.to_s.length }.max, 8].max
-      stdout.puts format("%-#{name_w}s  %-#{eva_w}s  %-9s  %s", "Station", "EVA", "Rows", "Train types")
-      stdout.puts "-" * (name_w + 2 + eva_w + 2 + 9 + 2 + 40)
+      stdout.puts format("%-#{name_w}s  %-#{eva_w}s  %-7s  %s", "Station", "EVA", "Trains", "Train types")
+      stdout.puts "-" * (name_w + 2 + eva_w + 2 + 7 + 2 + 40)
       rows.each do |r|
-        stdout.puts format("%-#{name_w}s  %-#{eva_w}s  %9d  %s",
-                           r.station_name, r.eva, r.rows, r.train_types.join(", "))
+        stdout.puts format("%-#{name_w}s  %-#{eva_w}s  %7d  %s",
+                           r.station_name, r.eva, r.trains, r.train_types.join(", "))
       end
       stdout.puts "(#{rows.size} EVA#{'s' unless rows.size == 1})"
       0

@@ -12,13 +12,17 @@ RSpec.describe TrainDelayMetrics::Stations do
     conn.execute(<<~SQL)
       COPY (
         SELECT * FROM (VALUES
-          ('Berlin Hbf',     '08011160', 'ICE'),
-          ('Berlin Hbf',     '08011160', 'IC'),
-          ('Berlin Hbf',     '08089001', 'S'),
-          ('Berlin Hbf',     '08089001', 'S'),
-          ('Munich Hbf',     '08000261', 'ICE'),
-          ('Hamburg Altona', '08002553', 'IC')
-        ) AS t(station_name, eva, train_type)
+          -- Berlin long-distance EVA: 2 distinct trains (ride_a ICE, ride_b IC),
+          -- ride_a observed twice (polling) so it must dedupe to 1.
+          ('Berlin Hbf',     '08011160', 'ICE', 'ride_a'),
+          ('Berlin Hbf',     '08011160', 'ICE', 'ride_a'),
+          ('Berlin Hbf',     '08011160', 'IC',  'ride_b'),
+          -- Berlin S-Bahn EVA: 1 distinct train across multiple observations
+          ('Berlin Hbf',     '08089001', 'S',   'ride_c'),
+          ('Berlin Hbf',     '08089001', 'S',   'ride_c'),
+          ('Munich Hbf',     '08000261', 'ICE', 'ride_d'),
+          ('Hamburg Altona', '08002553', 'IC',  'ride_e')
+        ) AS t(station_name, eva, train_type, train_line_ride_id)
       ) TO '#{parquet}' (FORMAT PARQUET);
     SQL
   end
@@ -34,10 +38,10 @@ RSpec.describe TrainDelayMetrics::Stations do
 
     expect(long_distance.station_name).to eq("Berlin Hbf")
     expect(long_distance.train_types).to contain_exactly("IC", "ICE")
-    expect(long_distance.rows).to eq(2)
+    expect(long_distance.trains).to eq(2) # ride_a + ride_b, polling dedup
 
     expect(s_bahn.train_types).to eq(["S"])
-    expect(s_bahn.rows).to eq(2)
+    expect(s_bahn.trains).to eq(1)        # ride_c counted once despite 2 rows
   end
 
   it "filters to only the requested train types" do
@@ -48,7 +52,7 @@ RSpec.describe TrainDelayMetrics::Stations do
     expect(rows.size).to eq(1)
     expect(rows.first.eva).to eq("08011160")
     expect(rows.first.train_types).to contain_exactly("IC", "ICE")
-    expect(rows.first.rows).to eq(2)
+    expect(rows.first.trains).to eq(2) # ride_a + ride_b, ride_c excluded by --types
   end
 
   it "returns empty for non-matching pattern" do

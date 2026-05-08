@@ -2,7 +2,7 @@ require "duckdb"
 
 module TrainDelayMetrics
   class Stations
-    Station = Struct.new(:station_name, :eva, :train_types, :rows, keyword_init: true)
+    Station = Struct.new(:station_name, :eva, :train_types, :trains, keyword_init: true)
 
     def initialize(parquet_glob:, connection: nil)
       @parquet_glob = parquet_glob
@@ -16,7 +16,7 @@ module TrainDelayMetrics
         SELECT station_name,
                eva,
                list(DISTINCT train_type ORDER BY train_type) AS train_types,
-               COUNT(*) AS rows
+               COUNT(DISTINCT train_line_ride_id) AS trains
         FROM read_parquet(?)
         WHERE station_name ILIKE ?
       SQL
@@ -27,7 +27,7 @@ module TrainDelayMetrics
         binds.concat(types)
       end
 
-      sql << "GROUP BY station_name, eva\nORDER BY station_name, rows DESC;"
+      sql << "GROUP BY station_name, eva\nORDER BY station_name, trains DESC;"
 
       stmt = connection.prepared_statement(sql)
       binds.each_with_index { |v, i| stmt.bind(i + 1, v) }
@@ -37,7 +37,7 @@ module TrainDelayMetrics
           station_name: row[0],
           eva:          row[1],
           train_types:  row[2] || [],
-          rows:         row[3].to_i
+          trains:       row[3].to_i
         )
       end
     end

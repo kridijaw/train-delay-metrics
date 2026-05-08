@@ -48,11 +48,13 @@ bundle exec bin/train-stations frankfurt --types IC,ICE   # only EVAs with IC/IC
 ```
 
 ```
-Station                  EVA       Rows       Train types
-Frankfurt (Main) Hbf     08000105    744141  Bus, EC, ECE, EN, HLB, IC, ICE, NJ, RB, RE, S, …
-Frankfurt (Main) Hbf     08098105    539301  S
+Station                  EVA       Trains   Train types
+Frankfurt (Main) Hbf     08000105     2870  Bus, EC, ECE, EN, HLB, IC, ICE, NJ, RB, RE, S, …
+Frankfurt (Main) Hbf     08098105      210  S
 ...
 ```
+
+`Trains` is `COUNT(DISTINCT train_line_ride_id)` — the number of unique scheduled services seen at that EVA in the dataset. With `--types`, the type filter applies to the count too (e.g. `--types IC,ICE` shows the number of distinct IC/ICE services).
 
 `PATTERN` is a SQL ILIKE pattern (`%` wildcards). A bare word is wrapped as `%word%`. The same physical station often has multiple EVAs — typically `08089xxx` / `08098xxx` for S-Bahn platforms and `0801xxxx` / `0800xxxx` for long-distance/regional.
 
