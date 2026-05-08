@@ -2,7 +2,16 @@ require "duckdb"
 
 module TrainDelayMetrics
   class Query
-    Result = Struct.new(:train_name, :total_trips, :canceled_trips, :delayed_trips, :delay_percentage, keyword_init: true)
+    Result = Struct.new(:train_name, :total_trips, :canceled_trips, :delayed_trips, :delay_percentage, keyword_init: true) do
+      # Share of *scheduled* trips that either ran late or were canceled.
+      # Denominator is total_trips + canceled_trips (i.e. everything that was
+      # supposed to run); numerator counts both failure modes.
+      def delay_or_cancel_percentage
+        scheduled = total_trips + canceled_trips
+        return nil if scheduled.zero?
+        100.0 * (delayed_trips + canceled_trips) / scheduled
+      end
+    end
 
     DEFAULT_GLOB = "data/deutsche_bahn/*.parquet".freeze
 

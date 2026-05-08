@@ -40,9 +40,10 @@ Total trips:                     621
 Trips canceled:                  29
 Trips delayed >= 20 min:         146
 Delay probability:               23.51%
+Delay-or-cancel probability:     27.08%
 ```
 
-`Total trips` counts only trips that actually ran. `Trips canceled` is reported alongside as a separate failure mode (it is not folded into `Delay probability`). The multi-train table adds a `Cancel` column with the same meaning.
+`Total trips` counts only trips that actually ran. `Trips canceled` is reported alongside as a separate failure mode (it is not folded into `Delay probability`). `Delay-or-cancel probability` is `(delayed + canceled) / (total + canceled)` — the share of *scheduled* trips that either ran late or didn't run at all. The multi-train table adds matching `Cancel` and `Prob%+C` columns.
 
 With multiple `--train` values the output switches to a compact table sorted by delay probability descending. Trains with no observed trips in the window are omitted.
 

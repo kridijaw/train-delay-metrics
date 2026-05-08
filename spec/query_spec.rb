@@ -55,6 +55,8 @@ RSpec.describe TrainDelayMetrics::Query do
     expect(result.delayed_trips).to eq(3)
     expect(result.canceled_trips).to eq(1)
     expect(result.delay_percentage).to be_within(0.001).of(60.0)
+    # (delayed + canceled) / (total + canceled) = (3 + 1) / (5 + 1)
+    expect(result.delay_or_cancel_percentage).to be_within(0.001).of(66.667)
   end
 
   it "returns zero counts and nil percentage when no rows match" do
@@ -67,6 +69,7 @@ RSpec.describe TrainDelayMetrics::Query do
     expect(result.canceled_trips).to eq(0)
     expect(result.delayed_trips).to eq(0)
     expect(result.delay_percentage).to be_nil
+    expect(result.delay_or_cancel_percentage).to be_nil
   end
 
   it "reports canceled-only trains with total_trips=0 and a non-nil canceled_trips" do
@@ -79,6 +82,8 @@ RSpec.describe TrainDelayMetrics::Query do
     expect(result.canceled_trips).to eq(2)
     expect(result.delayed_trips).to eq(0)
     expect(result.delay_percentage).to be_nil
+    # All scheduled trips were canceled → 100% disruption.
+    expect(result.delay_or_cancel_percentage).to be_within(0.001).of(100.0)
   end
 
   it "run_many returns multiple trains sorted by delay probability descending" do

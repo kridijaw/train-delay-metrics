@@ -170,17 +170,20 @@ module TrainDelayMetrics
       else
         stdout.puts "Delay probability:               - (no trips ran)"
       end
+      doc = r.delay_or_cancel_percentage
+      stdout.puts "Delay-or-cancel probability:     #{doc ? format('%.2f', doc) + '%' : '-'}"
     end
 
     def self.print_table(stdout, results, options, indent: "")
       name_w = [results.map { |r| r.train_name.to_s.length }.max, 5].max
-      stdout.puts indent + format("%-#{name_w}s  %7s  %7s  %7s  %7s",
-                                  "Train", "Trips", "Cancel", "Delay#{options[:threshold_minutes]}+", "Prob%")
-      stdout.puts indent + "-" * (name_w + 2 + 7 + 2 + 7 + 2 + 7 + 2 + 7)
+      stdout.puts indent + format("%-#{name_w}s  %7s  %7s  %7s  %7s  %7s",
+                                  "Train", "Trips", "Cancel", "Delay#{options[:threshold_minutes]}+", "Prob%", "Prob%+C")
+      stdout.puts indent + "-" * (name_w + 2 + 7 + 2 + 7 + 2 + 7 + 2 + 7 + 2 + 7)
       results.each do |r|
-        prob = r.delay_percentage ? format("%.2f", r.delay_percentage) : "-"
-        stdout.puts indent + format("%-#{name_w}s  %7d  %7d  %7d  %7s",
-                                    r.train_name, r.total_trips, r.canceled_trips, r.delayed_trips, prob)
+        prob   = r.delay_percentage           ? format("%.2f", r.delay_percentage)           : "-"
+        prob_c = r.delay_or_cancel_percentage ? format("%.2f", r.delay_or_cancel_percentage) : "-"
+        stdout.puts indent + format("%-#{name_w}s  %7d  %7d  %7d  %7s  %7s",
+                                    r.train_name, r.total_trips, r.canceled_trips, r.delayed_trips, prob, prob_c)
       end
     end
   end
