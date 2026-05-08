@@ -52,7 +52,7 @@ The multi-train table adds matching `Cancel`, `Prob%+C`, and `Peak D+C` columns 
 
 With multiple `--train` values the output switches to a compact table sorted by delay probability descending. Trains with no observed trips in the window are omitted.
 
-`--input FILE` replaces both `--train` and `--station`: it reads a JSON file written by `trains-by-station --out` and runs the delay query once per `{evas, trains}` group, measuring delay at any of the group's EVAs. Bare names are resolved literally first, then against `out/`, then with the `tbs_` prefix and `.json` extension applied — so `--input berlin_to_regensburg` resolves to `out/tbs_berlin_to_regensburg.json`. Pass `--input all` to iterate every `out/tbs_*.json` file (the auto-derived names from `trains-by-station --out`), printing a header per file.
+`--input FILE` replaces both `--train` and `--station`: it reads a JSON file written by `trains-by-station --out` and runs the delay query once per `{evas, trains}` group, measuring delay at any of the group's EVAs. Bare names are resolved literally first, then against `out/`, then with the `tbs_` prefix and `.json` extension applied — so `--input berlin_to_regensburg` resolves to `out/tbs_berlin_to_regensburg.json`. Umlauts are transliterated on the way in (`ü→ue`, `ö→oe`, `ä→ae`, `ß→ss`), so `--input düsseldorf_to_berlin` resolves to `out/tbs_duesseldorf_to_berlin.json`. Pass `--input all` to iterate every `out/tbs_*.json` file (the auto-derived names from `trains-by-station --out`), printing a header per file.
 
 `--train` also accepts `@FILE` to read newline-separated train names from a file — for example a list produced by `bin/get-trains --out`. Bare filenames are resolved against the current directory first, then against `out/`, so a file written by `get-trains` round-trips without retyping the path:
 
@@ -124,7 +124,7 @@ bundle exec bin/trains-by-station --from 08000105,08098105 --to 08000207,0809820
 bundle exec bin/trains-by-station --from 08000105,08098105 --to 08000207,08098207 --exclude-types FLX
 ```
 
-`--from` / `--to` accept either a comma-separated EVA list or `@FILE` to read newline-separated EVAs from a file. Inside `@FILE`, bare names are resolved literally first, then against `out/`, then with the `station_` prefix and `.txt` extension applied — so `--from @berlin` resolves to `out/station_berlin.txt`. `--to @frankfurt-evas.txt` still consumes a list produced by `find-train-stations --out`.
+`--from` / `--to` accept either a comma-separated EVA list or `@FILE` to read newline-separated EVAs from a file. Inside `@FILE`, bare names are resolved literally first, then against `out/`, then with the `station_` prefix and `.txt` extension applied — so `--from @berlin` resolves to `out/station_berlin.txt`. Umlauts are transliterated on the way in (`ü→ue`, `ö→oe`, `ä→ae`, `ß→ss`), so `--from @düsseldorf` resolves to `out/station_duesseldorf.txt`. `--to @frankfurt-evas.txt` still consumes a list produced by `find-train-stations --out`.
 
 Either side can also be the literal `all`, which expands to every `out/station_*.txt` file. Combined with the other side it iterates the cartesian product, skipping pairs where from and to are the same file. With `--out` (auto-derived), each pair writes its own JSON file. Useful for batch-generating delay queries across many station combinations.
 

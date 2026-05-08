@@ -69,4 +69,20 @@ RSpec.describe TrainDelayMetrics::FileInput do
   it "returns nil for a path with separators that does not exist" do
     expect(described_class.resolve("some/path.txt")).to be_nil
   end
+
+  it "transliterates German umlauts to ASCII when looking up files" do
+    File.write("out/station_duesseldorf.txt", "x")
+    expect(described_class.resolve("düsseldorf", prefix: "station_", extension: ".txt"))
+      .to eq("out/station_duesseldorf.txt")
+    expect(described_class.resolve("düsseldorf.txt", prefix: "station_", extension: ".txt"))
+      .to eq("out/station_duesseldorf.txt")
+    expect(described_class.resolve("station_düsseldorf.txt", prefix: "station_", extension: ".txt"))
+      .to eq("out/station_duesseldorf.txt")
+  end
+
+  it "transliterates ä, ö, ü, and ß without a prefix when an extension is given" do
+    File.write("out/koeln_muenchen_strasse.txt", "x")
+    expect(described_class.resolve("köln_münchen_straße", extension: ".txt"))
+      .to eq("out/koeln_muenchen_strasse.txt")
+  end
 end
