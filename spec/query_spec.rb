@@ -1,3 +1,4 @@
+require "date"
 require "duckdb"
 require "fileutils"
 require "tmpdir"
@@ -36,29 +37,33 @@ RSpec.describe TrainDelayMetrics::Query do
           -- ICE 333: only ever canceled → total_trips=0, canceled_trips=2
           ('ICE 333', '8000105',  0, (CURRENT_DATE - INTERVAL  10 DAY) + INTERVAL '12:00:00', TRUE,  (CURRENT_DATE - INTERVAL  10 DAY) + INTERVAL '12:00:00'),
           ('ICE 333', '8000105',  0, (CURRENT_DATE - INTERVAL  20 DAY) + INTERVAL '12:00:00', TRUE,  (CURRENT_DATE - INTERVAL  20 DAY) + INTERVAL '12:00:00'),
-          -- ICE 777: peak-window fixture. 4 always-delayed runs at 09:14,
-          -- 4 always-on-time runs at 17:00. Peak window must be 09:14 / 100%.
-          ('ICE 777', '8000105', 30, (CURRENT_DATE - INTERVAL   1 DAY) + INTERVAL '09:14:00', FALSE, (CURRENT_DATE - INTERVAL   1 DAY) + INTERVAL '09:14:00'),
-          ('ICE 777', '8000105', 30, (CURRENT_DATE - INTERVAL   2 DAY) + INTERVAL '09:14:00', FALSE, (CURRENT_DATE - INTERVAL   2 DAY) + INTERVAL '09:14:00'),
-          ('ICE 777', '8000105', 30, (CURRENT_DATE - INTERVAL   3 DAY) + INTERVAL '09:14:00', FALSE, (CURRENT_DATE - INTERVAL   3 DAY) + INTERVAL '09:14:00'),
-          ('ICE 777', '8000105', 30, (CURRENT_DATE - INTERVAL   4 DAY) + INTERVAL '09:14:00', FALSE, (CURRENT_DATE - INTERVAL   4 DAY) + INTERVAL '09:14:00'),
-          ('ICE 777', '8000105',  0, (CURRENT_DATE - INTERVAL   1 DAY) + INTERVAL '17:00:00', FALSE, (CURRENT_DATE - INTERVAL   1 DAY) + INTERVAL '17:00:00'),
-          ('ICE 777', '8000105',  0, (CURRENT_DATE - INTERVAL   2 DAY) + INTERVAL '17:00:00', FALSE, (CURRENT_DATE - INTERVAL   2 DAY) + INTERVAL '17:00:00'),
-          ('ICE 777', '8000105',  0, (CURRENT_DATE - INTERVAL   3 DAY) + INTERVAL '17:00:00', FALSE, (CURRENT_DATE - INTERVAL   3 DAY) + INTERVAL '17:00:00'),
-          ('ICE 777', '8000105',  0, (CURRENT_DATE - INTERVAL   4 DAY) + INTERVAL '17:00:00', FALSE, (CURRENT_DATE - INTERVAL   4 DAY) + INTERVAL '17:00:00'),
+          -- ICE 777: peak-window fixture. 4 always-delayed runs at 09:14
+          -- and 4 always-on-time runs at 17:00, all spaced one week apart so
+          -- they share the same weekday. Peak window must be 09:14 / 100%
+          -- on the weekday matching (CURRENT_DATE - 7 DAY).
+          ('ICE 777', '8000105', 30, (CURRENT_DATE - INTERVAL  7 DAY) + INTERVAL '09:14:00', FALSE, (CURRENT_DATE - INTERVAL  7 DAY) + INTERVAL '09:14:00'),
+          ('ICE 777', '8000105', 30, (CURRENT_DATE - INTERVAL 14 DAY) + INTERVAL '09:14:00', FALSE, (CURRENT_DATE - INTERVAL 14 DAY) + INTERVAL '09:14:00'),
+          ('ICE 777', '8000105', 30, (CURRENT_DATE - INTERVAL 21 DAY) + INTERVAL '09:14:00', FALSE, (CURRENT_DATE - INTERVAL 21 DAY) + INTERVAL '09:14:00'),
+          ('ICE 777', '8000105', 30, (CURRENT_DATE - INTERVAL 28 DAY) + INTERVAL '09:14:00', FALSE, (CURRENT_DATE - INTERVAL 28 DAY) + INTERVAL '09:14:00'),
+          ('ICE 777', '8000105',  0, (CURRENT_DATE - INTERVAL  7 DAY) + INTERVAL '17:00:00', FALSE, (CURRENT_DATE - INTERVAL  7 DAY) + INTERVAL '17:00:00'),
+          ('ICE 777', '8000105',  0, (CURRENT_DATE - INTERVAL 14 DAY) + INTERVAL '17:00:00', FALSE, (CURRENT_DATE - INTERVAL 14 DAY) + INTERVAL '17:00:00'),
+          ('ICE 777', '8000105',  0, (CURRENT_DATE - INTERVAL 21 DAY) + INTERVAL '17:00:00', FALSE, (CURRENT_DATE - INTERVAL 21 DAY) + INTERVAL '17:00:00'),
+          ('ICE 777', '8000105',  0, (CURRENT_DATE - INTERVAL 28 DAY) + INTERVAL '17:00:00', FALSE, (CURRENT_DATE - INTERVAL 28 DAY) + INTERVAL '17:00:00'),
           ('ICE 802', '8000001', 99, (CURRENT_DATE - INTERVAL  10 DAY) + INTERVAL '09:14:00', FALSE, (CURRENT_DATE - INTERVAL  10 DAY) + INTERVAL '09:14:00'),
           ('ICE 802', '8000105', 99, NULL,                                                    FALSE, NULL),
           ('ICE 802', '8000105', 99, (CURRENT_DATE - INTERVAL  10 DAY) + INTERVAL '09:14:00', TRUE,  (CURRENT_DATE - INTERVAL  10 DAY) + INTERVAL '09:14:00'),
           ('ICE 802', '8000105', 99, (CURRENT_DATE - INTERVAL 4 YEAR ) + INTERVAL '09:14:00', FALSE, (CURRENT_DATE - INTERVAL 4 YEAR ) + INTERVAL '09:14:00'),
           -- ICE 444: tests destination_evas dedup. Two destination EVAs
-          -- (8000900, 8000901) on the same calendar day. Day 1: arrives
-          -- 8000900 first at 12:00 (delay 5 min, on time), then 8000901 at
-          -- 12:30 (delay 25 min, late). Day 2: only 8000900 (delay 30 min).
-          -- Per-stop count would be 3 trips / 2 delayed; dedup picks the
-          -- earlier arrival per day so it's 2 trips / 1 delayed.
-          ('ICE 444', '8000900',  5, (CURRENT_DATE - INTERVAL   1 DAY) + INTERVAL '12:00:00', FALSE, (CURRENT_DATE - INTERVAL   1 DAY) + INTERVAL '12:00:00'),
-          ('ICE 444', '8000901', 25, (CURRENT_DATE - INTERVAL   1 DAY) + INTERVAL '12:30:00', FALSE, (CURRENT_DATE - INTERVAL   1 DAY) + INTERVAL '12:30:00'),
-          ('ICE 444', '8000900', 30, (CURRENT_DATE - INTERVAL   2 DAY) + INTERVAL '12:00:00', FALSE, (CURRENT_DATE - INTERVAL   2 DAY) + INTERVAL '12:00:00')
+          -- (8000900, 8000901). Both fixture days are on the same weekday
+          -- (one week apart) so the peak-window weekday assertion is
+          -- deterministic. Day 1: arrives 8000900 first at 12:00 (delay 5
+          -- min, on time), then 8000901 at 12:30 (delay 25 min, late).
+          -- Day 2: only 8000900 (delay 30 min). Per-stop count would be 3
+          -- trips / 2 delayed; dedup picks the LATEST arrival per day so
+          -- it's 2 trips / 2 delayed.
+          ('ICE 444', '8000900',  5, (CURRENT_DATE - INTERVAL  7 DAY) + INTERVAL '12:00:00', FALSE, (CURRENT_DATE - INTERVAL  7 DAY) + INTERVAL '12:00:00'),
+          ('ICE 444', '8000901', 25, (CURRENT_DATE - INTERVAL  7 DAY) + INTERVAL '12:30:00', FALSE, (CURRENT_DATE - INTERVAL  7 DAY) + INTERVAL '12:30:00'),
+          ('ICE 444', '8000900', 30, (CURRENT_DATE - INTERVAL 14 DAY) + INTERVAL '12:00:00', FALSE, (CURRENT_DATE - INTERVAL 14 DAY) + INTERVAL '12:00:00')
         )
       ) TO '#{parquet}' (FORMAT PARQUET);
     SQL
@@ -107,7 +112,7 @@ RSpec.describe TrainDelayMetrics::Query do
     expect(result.delay_or_cancel_percentage).to be_within(0.001).of(100.0)
   end
 
-  it "peak_windows finds the ±30 min departure-time window with the most disruptions" do
+  it "peak_windows finds the (weekday, ±30 min) bucket with the most disruptions" do
     peaks = described_class.new(parquet_glob: glob).peak_windows(
       train_names: ["ICE 777"], station_eva: "8000105",
       threshold_minutes: 20, years_back: 3
@@ -117,6 +122,10 @@ RSpec.describe TrainDelayMetrics::Query do
     expect(peak).not_to be_nil
     expect(peak.center_minute).to eq(9 * 60 + 14)
     expect(peak.center_hhmm).to eq("09:14")
+    # All ICE 777 fixture rows are spaced 7 days apart, so they share the
+    # weekday of (today - 7 days) — which is just today's weekday.
+    expect(peak.weekday).to eq(Date.today.wday)
+    expect(peak.weekday_abbr).to eq(Date::ABBR_DAYNAMES[Date.today.wday])
     expect(peak.disrupted).to eq(4)
     expect(peak.scheduled).to eq(4)
     expect(peak.percentage).to be_within(0.001).of(100.0)
@@ -162,9 +171,10 @@ RSpec.describe TrainDelayMetrics::Query do
     peak = peaks["ICE 444"]
     expect(peak).not_to be_nil
     # Latest-arrival dedup keeps day 1's 8000901@12:30 row and day 2's
-    # 8000900@12:00 row. Both fall in a single ±30 min window, both are
-    # disruptions; the 12:00 and 12:30 centers tie on count and rate so
-    # the earlier one wins the tiebreaker.
+    # 8000900@12:00 row. Both fall in a single ±30 min window on the same
+    # weekday, both are disruptions; the 12:00 and 12:30 centers tie on
+    # count and rate so the earlier one wins the tiebreaker.
+    expect(peak.weekday).to eq(Date.today.wday)
     expect(peak.center_hhmm).to eq("12:00")
     expect(peak.scheduled).to eq(2)
     expect(peak.disrupted).to eq(2)

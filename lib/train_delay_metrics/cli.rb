@@ -200,7 +200,7 @@ module TrainDelayMetrics
       label = label.ljust(33)
       if peak && peak.scheduled.positive?
         stdout.puts format("%s%s (%.2f%%, %d of %d)",
-                           label, peak.center_hhmm, peak.percentage, peak.disrupted, peak.scheduled)
+                           label, peak.center_label, peak.percentage, peak.disrupted, peak.scheduled)
       else
         stdout.puts "#{label}-"
       end
@@ -208,7 +208,7 @@ module TrainDelayMetrics
 
     def self.print_table(stdout, results, peaks, options, indent: "", time_source: :departure)
       name_w = [results.map { |r| r.train_name.to_s.length }.max, 5].max
-      peak_w = 12 # fits "Arr Peak D+C" / "Dep Peak D+C" exactly; cells right-align inside
+      peak_w = 14 # fits "Sat 21:31 100%" cells; header right-aligns inside
       peak_header = "#{peak_time_label(time_source).capitalize} Peak D+C"
       stdout.puts indent + format("%-#{name_w}s  %7s  %7s  %7s  %7s  %7s  %#{peak_w}s",
                                   "Train", "Trips", "Cancel", "Delay#{options[:threshold_minutes]}+",
@@ -224,11 +224,11 @@ module TrainDelayMetrics
       end
     end
 
-    # Compact "HH:MM NNN%" for the table; "-" when no peak data is available
-    # (e.g. no rows at the EVA had departure_planned_time, like a terminus).
+    # Compact "DDD HH:MM NNN%" for the table (14 chars); "-" when no peak
+    # data is available (e.g. no rows at the EVA had a usable timestamp).
     def self.format_peak_cell(peak)
       return "-" unless peak && peak.scheduled.positive?
-      format("%s %3d%%", peak.center_hhmm, peak.percentage.round)
+      format("%s %3d%%", peak.center_label, peak.percentage.round)
     end
 
     # "dep" for per-stop mode (time-of-day = departure_planned_time),

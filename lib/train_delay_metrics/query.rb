@@ -13,13 +13,26 @@ module TrainDelayMetrics
       end
     end
 
-    # Time-of-day window (centered on a departure minute, ±30 min) where the
-    # train accumulated the most disruptions (delay >= threshold OR canceled).
-    # Ranked by absolute disrupted count to avoid single-flier 100% windows;
-    # ties broken by rate, then earliest center.
-    PeakWindow = Struct.new(:center_minute, :scheduled, :disrupted, :percentage, keyword_init: true) do
+    # (Weekday, minute-of-day) window (±30 min within the same weekday) where
+    # the train accumulated the most disruptions (delay >= threshold OR
+    # canceled). Ranked by absolute disrupted count to avoid single-flier
+    # 100% windows; ties broken by rate, then earliest weekday, then earliest
+    # minute. weekday is DuckDB's DOW: 0=Sunday..6=Saturday (matches Ruby's
+    # Date#wday and indexes DAY_ABBR directly).
+    DAY_ABBR = %w[Sun Mon Tue Wed Thu Fri Sat].freeze
+
+    PeakWindow = Struct.new(:weekday, :center_minute, :scheduled, :disrupted, :percentage, keyword_init: true) do
       def center_hhmm
         format("%02d:%02d", center_minute / 60, center_minute % 60)
+      end
+
+      def weekday_abbr
+        DAY_ABBR[weekday]
+      end
+
+      # "Sat 21:31" — weekday + time, the human label for the window center.
+      def center_label
+        "#{weekday_abbr} #{center_hhmm}"
       end
     end
 
@@ -232,36 +245,40 @@ module TrainDelayMetrics
       sql = base_cte + <<~SQL
         per_min AS (
           SELECT train_name,
+                 EXTRACT(DOW FROM time_of_day_ts)::INTEGER                                 AS weekday,
                  (EXTRACT(HOUR FROM time_of_day_ts) * 60
-                  + EXTRACT(MINUTE FROM time_of_day_ts))::INTEGER AS dep_min,
+                  + EXTRACT(MINUTE FROM time_of_day_ts))::INTEGER                          AS dep_min,
                  COUNT(*)                                                                  AS scheduled,
                  COUNT(*) FILTER (WHERE is_canceled OR delay_in_min >= ?)                  AS disrupted
           FROM base
-          GROUP BY train_name, dep_min
+          GROUP BY train_name, weekday, dep_min
         ),
         windowed AS (
           SELECT a.train_name,
+                 a.weekday                AS weekday,
                  a.dep_min                AS center_min,
                  SUM(b.scheduled)         AS w_scheduled,
                  SUM(b.disrupted)         AS w_disrupted
           FROM per_min a
           JOIN per_min b
             ON a.train_name = b.train_name
+           AND a.weekday    = b.weekday
            AND b.dep_min BETWEEN a.dep_min - 30 AND a.dep_min + 30
-          GROUP BY a.train_name, a.dep_min
+          GROUP BY a.train_name, a.weekday, a.dep_min
         ),
         ranked AS (
-          SELECT train_name, center_min, w_scheduled, w_disrupted,
+          SELECT train_name, weekday, center_min, w_scheduled, w_disrupted,
                  ROW_NUMBER() OVER (
                    PARTITION BY train_name
                    ORDER BY w_disrupted DESC,
                             CASE WHEN w_scheduled = 0 THEN 0
                                  ELSE w_disrupted::DOUBLE / w_scheduled END DESC,
+                            weekday    ASC,
                             center_min ASC
                  ) AS rn
           FROM windowed
         )
-        SELECT train_name, center_min, w_scheduled, w_disrupted
+        SELECT train_name, weekday, center_min, w_scheduled, w_disrupted
         FROM ranked
         WHERE rn = 1
       SQL
@@ -272,10 +289,11 @@ module TrainDelayMetrics
 
       out = {}
       stmt.execute.each do |row|
-        sched = row[2].to_i
-        disrupt = row[3].to_i
+        sched   = row[3].to_i
+        disrupt = row[4].to_i
         out[row[0]] = PeakWindow.new(
-          center_minute: row[1].to_i,
+          weekday:       row[1].to_i,
+          center_minute: row[2].to_i,
           scheduled:     sched,
           disrupted:     disrupt,
           percentage:    sched.zero? ? nil : 100.0 * disrupt / sched

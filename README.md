@@ -41,14 +41,14 @@ Trips canceled:                  29
 Trips delayed >= 20 min:         146
 Delay probability:               23.51%
 Delay-or-cancel probability:     27.08%
-Peak dep window (±30m):          20:51 (27.48%, 180 of 655)
+Peak dep window (±30m):          Sun 20:51 (31.91%, 30 of 94)
 ```
 
 `Total trips` counts only trips that actually ran. `Trips canceled` is reported alongside as a separate failure mode (it is not folded into `Delay probability`). `Delay-or-cancel probability` is `(delayed + canceled) / (total + canceled)` — the share of *scheduled* trips that either ran late or didn't run at all.
 
-`Peak <kind> window (±30m)` is the time-of-day where the train accumulated the most disruptions (delayed ≥ threshold OR canceled), summed over a ±30 minute span centered on an observed minute. Ranking is by absolute disruption count (not rate), so a single 100%-disrupted run at an off-hour can't win. The reported percentage is `disrupted / scheduled` inside that window. The window does not wrap across midnight.
+`Peak <kind> window (±30m)` is the `(weekday, time-of-day)` bucket where the train accumulated the most disruptions (delayed ≥ threshold OR canceled), summed over a ±30 minute span centered on an observed minute *on that same weekday*. Ranking is by absolute disruption count (not rate), so a single 100%-disrupted run at an off-hour can't win. The reported percentage is `disrupted / scheduled` inside that bucket. The window does not wrap across midnight or across weekdays.
 
-The `<kind>` reflects the time source for the queried row set: `dep` (`departure_planned_time`) in per-stop mode (`--station` or `--input` against a legacy JSON without a `to` array), and `arr` (`arrival_planned_time` at the destination EVA) in destination-dedup mode (`--input` against a JSON with a `to` array). The multi-train table column is labelled `Dep Peak D+C` or `Arr Peak D+C` accordingly; the cell is the compact `HH:MM NN%` form.
+The `<kind>` reflects the time source for the queried row set: `dep` (`departure_planned_time`) in per-stop mode (`--station` or `--input` against a legacy JSON without a `to` array), and `arr` (`arrival_planned_time` at the destination EVA) in destination-dedup mode (`--input` against a JSON with a `to` array). The multi-train table column is labelled `Dep Peak D+C` or `Arr Peak D+C` accordingly; the cell is the compact `DDD HH:MM NN%` form (e.g. `Wed 21:31  97%`).
 
 With multiple `--train` values the output switches to a compact table sorted by delay probability descending. Trains with no observed trips in the window are omitted.
 
