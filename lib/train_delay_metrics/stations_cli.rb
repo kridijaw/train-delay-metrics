@@ -68,8 +68,8 @@ module TrainDelayMetrics
 
     def self.derive_filename(pattern_raw)
       slug = pattern_raw.to_s.gsub(/[^A-Za-z0-9]+/, "_").gsub(/^_+|_+$/, "")
-      slug = "stations" if slug.empty?
-      "#{slug}.txt"
+      slug = "all" if slug.empty?
+      "station-#{slug}.txt"
     end
   end
 end

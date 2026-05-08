@@ -59,7 +59,7 @@ bundle exec bin/find-train-stations frankfurt
 bundle exec bin/find-train-stations "berlin sp%"
 bundle exec bin/find-train-stations frankfurt --types IC,ICE   # only EVAs with IC/ICE service
 bundle exec bin/find-train-stations frankfurt --types IC,ICE --out frankfurt-evas.txt   # save EVAs to out/
-bundle exec bin/find-train-stations frankfurt --types IC,ICE --out                       # derives out/frankfurt.txt
+bundle exec bin/find-train-stations frankfurt --types IC,ICE --out                       # derives out/station-frankfurt.txt
 ```
 
 ```
