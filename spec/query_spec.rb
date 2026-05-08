@@ -130,7 +130,7 @@ RSpec.describe TrainDelayMetrics::Query do
     expect(peaks).to be_empty
   end
 
-  it "destination_evas dedupes to one row per (train, day) using the earliest arrival" do
+  it "destination_evas dedupes to one row per (train, day) using the latest arrival" do
     per_stop = described_class.new(parquet_glob: glob).run_many(
       train_names: ["ICE 444"], station_evas: ["8000900", "8000901"],
       threshold_minutes: 20, years_back: 3
@@ -140,18 +140,18 @@ RSpec.describe TrainDelayMetrics::Query do
       threshold_minutes: 20, years_back: 3
     ).first
 
-    # Per-stop counts every matching row: 3 trips, 1 delayed at >=20 (the
-    # 25-min stop at 8000901; the 5-min and 30-min are at 8000900 — actually
-    # the 30-min is delayed too).
+    # Per-stop counts every matching row: 3 trips, 2 delayed at >=20 (the
+    # 25-min stop at 8000901 on day 1, plus the 30-min stop at 8000900 on
+    # day 2). The 5-min stop on day 1 is on time.
     expect(per_stop.total_trips).to eq(3)
     expect(per_stop.delayed_trips).to eq(2)
 
-    # Dedup picks the EARLIEST arrival per day at any destination EVA. Day 1
-    # picks 8000900@12:00 (5 min, on time). Day 2 has only 8000900 (30 min,
-    # delayed). So 2 trips, 1 delayed.
+    # Dedup picks the LATEST arrival per day at any destination EVA. Day 1
+    # picks 8000901@12:30 (25 min, delayed). Day 2 has only 8000900 (30 min,
+    # delayed). So 2 trips, 2 delayed.
     expect(deduped.total_trips).to eq(2)
-    expect(deduped.delayed_trips).to eq(1)
-    expect(deduped.delay_percentage).to be_within(0.001).of(50.0)
+    expect(deduped.delayed_trips).to eq(2)
+    expect(deduped.delay_percentage).to be_within(0.001).of(100.0)
   end
 
   it "peak_windows in destination mode uses arrival_planned_time so terminus stops count" do
@@ -161,11 +161,13 @@ RSpec.describe TrainDelayMetrics::Query do
     )
     peak = peaks["ICE 444"]
     expect(peak).not_to be_nil
-    # Earliest-arrival dedup picks 12:00 on both days. Window centered there
-    # has 2 scheduled, 1 disrupted (the 30-min day-2 row).
+    # Latest-arrival dedup keeps day 1's 8000901@12:30 row and day 2's
+    # 8000900@12:00 row. Both fall in a single ±30 min window, both are
+    # disruptions; the 12:00 and 12:30 centers tie on count and rate so
+    # the earlier one wins the tiebreaker.
     expect(peak.center_hhmm).to eq("12:00")
     expect(peak.scheduled).to eq(2)
-    expect(peak.disrupted).to eq(1)
+    expect(peak.disrupted).to eq(2)
   end
 
   it "run_many returns multiple trains sorted by delay probability descending" do

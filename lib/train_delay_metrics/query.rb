@@ -54,12 +54,14 @@ module TrainDelayMetrics
     #   EVAs in the same day contributes two rows.
     #
     # * Destination-deduplicated. Pass `destination_evas:`. The query
-    #   restricts to those EVAs and keeps the first arrival per
+    #   restricts to those EVAs and keeps the *latest* arrival per
     #   (train_name, calendar day) so a single run counts as one trip even
-    #   if it stops at multiple destination EVAs on the same day. This is
-    #   what `train-delay --input` uses with the `to` array, modelling a
-    #   passenger journey ("did the train get me to my destination on
-    #   time?") instead of station throughput.
+    #   if it stops at multiple destination EVAs on the same day. The
+    #   latest arrival is the train's final stop among the destination
+    #   EVAs that day — modelling "did the train deliver me to my final
+    #   stop on time?" rather than "was its first qualifying stop on
+    #   time?". This is what `train-delay --input` uses with the `to`
+    #   array.
     #
     # Returns an array of Result, ordered by delay_percentage DESC (NULL
     # last).
@@ -86,8 +88,9 @@ module TrainDelayMetrics
       # ran, was it late?". canceled_trips is reported alongside as a separate
       # failure mode — it doesn't get folded into the percentage.
       filter_cte = if dedup_by_day
-                     # Keep only the first arrival per (train, day) so a run
-                     # touching multiple destination EVAs is counted once.
+                     # Keep only the latest arrival per (train, day) so a run
+                     # touching multiple destination EVAs is counted once,
+                     # at its final destination-EVA stop.
                      <<~SQL
                        WITH base AS (
                          SELECT train_name, eva, delay_in_min, is_canceled, arrival_planned_time
@@ -98,7 +101,7 @@ module TrainDelayMetrics
                            AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 YEAR) * ?
                          QUALIFY ROW_NUMBER() OVER (
                            PARTITION BY train_name, CAST(arrival_planned_time AS DATE)
-                           ORDER BY arrival_planned_time, eva
+                           ORDER BY arrival_planned_time DESC, eva DESC
                          ) = 1
                        )
                      SQL
@@ -191,7 +194,8 @@ module TrainDelayMetrics
       base_cte = if dedup_by_day
                    # Use arrival_planned_time so terminus stops are included,
                    # and dedupe to one row per (train, day) so a run touching
-                   # multiple destination EVAs is counted once.
+                   # multiple destination EVAs is counted once at its latest
+                   # destination-EVA stop (matches run_many's tiebreaker).
                    <<~SQL
                      WITH base AS (
                        SELECT train_name,
@@ -205,7 +209,7 @@ module TrainDelayMetrics
                          AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 YEAR) * ?
                        QUALIFY ROW_NUMBER() OVER (
                          PARTITION BY train_name, CAST(arrival_planned_time AS DATE)
-                         ORDER BY arrival_planned_time, eva
+                         ORDER BY arrival_planned_time DESC, eva DESC
                        ) = 1
                      ),
                    SQL
