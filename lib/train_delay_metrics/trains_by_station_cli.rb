@@ -133,7 +133,7 @@ module TrainDelayMetrics
       s = spec.to_s
       s = s[1..] if s.start_with?("@")
       s = File.basename(s, ".*") if s.include?(".")
-      s.gsub(/[^A-Za-z0-9]+/, "_").gsub(/^_+|_+$/, "")
+      Slug.slugify(s)
     end
 
     def self.write_out(stdout, path, groups)
