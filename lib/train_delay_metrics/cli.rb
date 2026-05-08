@@ -113,7 +113,7 @@ module TrainDelayMetrics
       if results.size == 1
         print_single(stdout, results.first, options)
       else
-        with_data = results.reject { |r| r.total_trips.zero? }
+        with_data = results.reject { |r| r.total_trips.zero? && r.canceled_trips.zero? }
         if with_data.empty?
           stdout.puts %{No trips found for any of the requested trains at EVA #{options[:station_eva]} in the last #{options[:years_back]} year(s).}
         else
@@ -147,7 +147,7 @@ module TrainDelayMetrics
           threshold_minutes: options[:threshold_minutes],
           years_back:        options[:years_back]
         )
-        with_data = results.reject { |r| r.total_trips.zero? }
+        with_data = results.reject { |r| r.total_trips.zero? && r.canceled_trips.zero? }
         if with_data.empty?
           stdout.puts "  No trips found in the last #{options[:years_back]} year(s)."
         else
@@ -158,24 +158,29 @@ module TrainDelayMetrics
     end
 
     def self.print_single(stdout, r, options)
-      if r.total_trips.zero?
+      if r.total_trips.zero? && r.canceled_trips.zero?
         stdout.puts %{No trips found for "#{r.train_name}" at EVA #{options[:station_eva]} in the last #{options[:years_back]} year(s).}
         return
       end
       stdout.puts "Total trips:                     #{r.total_trips}"
+      stdout.puts "Trips canceled:                  #{r.canceled_trips}"
       stdout.puts "Trips delayed >= #{options[:threshold_minutes]} min:        #{r.delayed_trips}"
-      stdout.puts "Delay probability:               #{format('%.2f', r.delay_percentage)}%"
+      if r.delay_percentage
+        stdout.puts "Delay probability:               #{format('%.2f', r.delay_percentage)}%"
+      else
+        stdout.puts "Delay probability:               - (no trips ran)"
+      end
     end
 
     def self.print_table(stdout, results, options, indent: "")
       name_w = [results.map { |r| r.train_name.to_s.length }.max, 5].max
-      stdout.puts indent + format("%-#{name_w}s  %7s  %7s  %7s",
-                                  "Train", "Trips", "Delay#{options[:threshold_minutes]}+", "Prob%")
-      stdout.puts indent + "-" * (name_w + 2 + 7 + 2 + 7 + 2 + 7)
+      stdout.puts indent + format("%-#{name_w}s  %7s  %7s  %7s  %7s",
+                                  "Train", "Trips", "Cancel", "Delay#{options[:threshold_minutes]}+", "Prob%")
+      stdout.puts indent + "-" * (name_w + 2 + 7 + 2 + 7 + 2 + 7 + 2 + 7)
       results.each do |r|
         prob = r.delay_percentage ? format("%.2f", r.delay_percentage) : "-"
-        stdout.puts indent + format("%-#{name_w}s  %7d  %7d  %7s",
-                                    r.train_name, r.total_trips, r.delayed_trips, prob)
+        stdout.puts indent + format("%-#{name_w}s  %7d  %7d  %7d  %7s",
+                                    r.train_name, r.total_trips, r.canceled_trips, r.delayed_trips, prob)
       end
     end
   end

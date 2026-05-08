@@ -37,9 +37,12 @@ bundle exec bin/train-delay --train "ICE 821,ICE 825,ICE 824" --station 08000105
 
 ```
 Total trips:                     621
+Trips canceled:                  29
 Trips delayed >= 20 min:         146
 Delay probability:               23.51%
 ```
+
+`Total trips` counts only trips that actually ran. `Trips canceled` is reported alongside as a separate failure mode (it is not folded into `Delay probability`). The multi-train table adds a `Cancel` column with the same meaning.
 
 With multiple `--train` values the output switches to a compact table sorted by delay probability descending. Trains with no observed trips in the window are omitted.
 
@@ -187,9 +190,9 @@ duckdb -c "SELECT DISTINCT station_name, eva FROM read_parquet('data/deutsche_ba
 | `eva`                  | string    | EVA station id, zero-padded (e.g. `08000105`)  |
 | `delay_in_min`         | integer   | already in **minutes** (not seconds)           |
 | `arrival_planned_time` | timestamp | NULL for stops with no arrival (origin)        |
-| `is_canceled`          | boolean   | rows where this is `TRUE` are excluded         |
+| `is_canceled`          | boolean   | reported as `Cancel` count; excluded from `Trips` and the delay percentage |
 
-The query filters `arrival_planned_time IS NOT NULL AND is_canceled = FALSE`.
+The query filters `arrival_planned_time IS NOT NULL`. Canceled rows are kept and counted separately so a frequently-canceled train doesn't masquerade as a punctual one — `Trips` and `Delay probability` are computed over rows that actually ran (`is_canceled = FALSE`); `Cancel` is the count of `is_canceled = TRUE` rows in the same window.
 
 ## Test
 

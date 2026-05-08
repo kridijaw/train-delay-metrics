@@ -2,7 +2,7 @@ require "duckdb"
 
 module TrainDelayMetrics
   class Query
-    Result = Struct.new(:train_name, :total_trips, :delayed_trips, :delay_percentage, keyword_init: true)
+    Result = Struct.new(:train_name, :total_trips, :canceled_trips, :delayed_trips, :delay_percentage, keyword_init: true)
 
     DEFAULT_GLOB = "data/deutsche_bahn/*.parquet".freeze
 
@@ -25,7 +25,7 @@ module TrainDelayMetrics
         threshold_minutes: threshold_minutes,
         years_back:        years_back
       )
-      results.first || Result.new(train_name: train_name.to_s, total_trips: 0, delayed_trips: 0, delay_percentage: nil)
+      results.first || Result.new(train_name: train_name.to_s, total_trips: 0, canceled_trips: 0, delayed_trips: 0, delay_percentage: nil)
     end
 
     # Computes delay statistics for one or more trains across one or more
@@ -42,18 +42,23 @@ module TrainDelayMetrics
       train_placeholders = (["?"] * names.size).join(", ")
       eva_placeholders   = (["?"] * evas.size).join(", ")
 
+      # total_trips counts only trips that ran (is_canceled = FALSE) so that
+      # delay_percentage = delayed_trips / total_trips means "given the train
+      # ran, was it late?". canceled_trips is reported alongside as a separate
+      # failure mode — it doesn't get folded into the percentage.
       sql = <<~SQL
         SELECT train_name,
-               COUNT(*)                                                  AS total_trips,
-               COUNT(*) FILTER (WHERE delay_in_min >= ?)                 AS delayed_trips,
-               CASE WHEN COUNT(*) = 0 THEN NULL
-                    ELSE 100.0 * COUNT(*) FILTER (WHERE delay_in_min >= ?) / COUNT(*)
-               END                                                       AS delay_percentage
+               COUNT(*) FILTER (WHERE is_canceled = FALSE)                              AS total_trips,
+               COUNT(*) FILTER (WHERE is_canceled = TRUE)                               AS canceled_trips,
+               COUNT(*) FILTER (WHERE is_canceled = FALSE AND delay_in_min >= ?)        AS delayed_trips,
+               CASE WHEN COUNT(*) FILTER (WHERE is_canceled = FALSE) = 0 THEN NULL
+                    ELSE 100.0 * COUNT(*) FILTER (WHERE is_canceled = FALSE AND delay_in_min >= ?)
+                               / COUNT(*) FILTER (WHERE is_canceled = FALSE)
+               END                                                                      AS delay_percentage
         FROM read_parquet(?)
         WHERE train_name IN (#{train_placeholders})
           AND eva IN (#{eva_placeholders})
           AND arrival_planned_time IS NOT NULL
-          AND is_canceled = FALSE
           AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 YEAR) * ?
         GROUP BY train_name
       SQL
@@ -67,15 +72,16 @@ module TrainDelayMetrics
         seen[row[0]] = Result.new(
           train_name:       row[0],
           total_trips:      row[1].to_i,
-          delayed_trips:    row[2].to_i,
-          delay_percentage: row[3]&.to_f
+          canceled_trips:   row[2].to_i,
+          delayed_trips:    row[3].to_i,
+          delay_percentage: row[4]&.to_f
         )
       end
 
       # Include zero-row results for trains that had no matching data so the
       # caller can see they were checked.
       names.each do |n|
-        seen[n] ||= Result.new(train_name: n, total_trips: 0, delayed_trips: 0, delay_percentage: nil)
+        seen[n] ||= Result.new(train_name: n, total_trips: 0, canceled_trips: 0, delayed_trips: 0, delay_percentage: nil)
       end
 
       seen.values.sort_by { |r| [r.delay_percentage ? -r.delay_percentage : Float::INFINITY, TrainName.sort_key(r.train_name)] }

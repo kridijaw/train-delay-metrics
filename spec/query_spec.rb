@@ -31,6 +31,9 @@ RSpec.describe TrainDelayMetrics::Query do
           ('ICE 999', '8000105', 99, CURRENT_TIMESTAMP - INTERVAL  10 DAY, FALSE),
           -- ICE 555: one trip, never delayed → 0%
           ('ICE 555', '8000105',  2, CURRENT_TIMESTAMP - INTERVAL   5 DAY, FALSE),
+          -- ICE 333: only ever canceled → total_trips=0, canceled_trips=2
+          ('ICE 333', '8000105',  0, CURRENT_TIMESTAMP - INTERVAL  10 DAY, TRUE),
+          ('ICE 333', '8000105',  0, CURRENT_TIMESTAMP - INTERVAL  20 DAY, TRUE),
           ('ICE 802', '8000001', 99, CURRENT_TIMESTAMP - INTERVAL  10 DAY, FALSE),
           ('ICE 802', '8000105', 99, NULL,                                FALSE),
           ('ICE 802', '8000105', 99, CURRENT_TIMESTAMP - INTERVAL  10 DAY, TRUE),
@@ -50,6 +53,7 @@ RSpec.describe TrainDelayMetrics::Query do
 
     expect(result.total_trips).to eq(5)
     expect(result.delayed_trips).to eq(3)
+    expect(result.canceled_trips).to eq(1)
     expect(result.delay_percentage).to be_within(0.001).of(60.0)
   end
 
@@ -60,6 +64,19 @@ RSpec.describe TrainDelayMetrics::Query do
     )
 
     expect(result.total_trips).to eq(0)
+    expect(result.canceled_trips).to eq(0)
+    expect(result.delayed_trips).to eq(0)
+    expect(result.delay_percentage).to be_nil
+  end
+
+  it "reports canceled-only trains with total_trips=0 and a non-nil canceled_trips" do
+    result = described_class.new(parquet_glob: glob).run(
+      train_name: "ICE 333", station_eva: "8000105",
+      threshold_minutes: 20, years_back: 3
+    )
+
+    expect(result.total_trips).to eq(0)
+    expect(result.canceled_trips).to eq(2)
     expect(result.delayed_trips).to eq(0)
     expect(result.delay_percentage).to be_nil
   end
