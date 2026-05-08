@@ -7,9 +7,7 @@ module TrainDelayMetrics
     def self.run(argv, stdout: $stdout, stderr: $stderr)
       options = {
         years_back:    nil,
-        unique:        false,
         exclude_types: [],
-        out:           nil,
         parquet_glob:  Query::DEFAULT_GLOB
       }
 
@@ -18,9 +16,7 @@ module TrainDelayMetrics
         o.on("--from LIST", Array, "Origin EVA(s), comma-separated, e.g. 08000105 or 08000105,08098105") { |v| options[:from_evas] = v }
         o.on("--to LIST",   Array, "Destination EVA(s), comma-separated")                                 { |v| options[:to_evas]   = v }
         o.on("--years N", Integer, "Years of history (default: all available data)") { |v| options[:years_back] = v }
-        o.on("--unique", "Print only an alphabetically sorted, deduplicated list of train names (no times/days/obs)") { options[:unique] = true }
         o.on("--exclude-types LIST", Array, %q{Exclude train_types (case-insensitive), e.g. --exclude-types FLX,DPF}) { |v| options[:exclude_types] = v }
-        o.on("--out FILE", "Write the --unique train-name list to FILE, one per line (stdout still shows the window summary). Ignored without --unique.") { |v| options[:out] = v }
         o.on("--data GLOB", "Parquet glob (default #{Query::DEFAULT_GLOB})") { |v| options[:parquet_glob] = v }
         o.on("-h", "--help") { stdout.puts o; return 0 }
       end
@@ -48,30 +44,6 @@ module TrainDelayMetrics
           [min_d&.to_s || "(none)", max_d&.to_s || "(none)"]
         end
       stdout.puts "Window: #{window_from} -> #{window_to}#{options[:years_back] ? " (--years #{options[:years_back]})" : " (full dataset)"}"
-
-      if options[:unique]
-        names = svc.unique_train_names(
-          from_eva:      options[:from_evas],
-          to_eva:        options[:to_evas],
-          years_back:    options[:years_back],
-          exclude_types: options[:exclude_types]
-        )
-        if names.empty?
-          stdout.puts "No connections found from #{options[:from_evas].join(',')} to #{options[:to_evas].join(',')}."
-          return 0
-        end
-        if options[:out]
-          File.write(options[:out], names.join("\n") + "\n")
-          stdout.puts "Wrote #{names.size} train names to #{options[:out]}."
-        else
-          names.each { |n| stdout.puts n }
-        end
-        return 0
-      end
-
-      if options[:out]
-        stderr.puts "--out is only used with --unique; ignoring."
-      end
 
       rows = svc.run(
         from_eva:      options[:from_evas],
