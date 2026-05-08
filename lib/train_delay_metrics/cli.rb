@@ -145,7 +145,7 @@ module TrainDelayMetrics
         end
 
         stdout.puts if i > 0
-        stdout.puts "Group #{i + 1}: EVAs #{evas.join(', ')}  (#{trains.size} train#{'s' unless trains.size == 1})"
+        stdout.puts "Group #{i + 1}: #{format_group_title(g, evas)}"
 
         results = query.run_many(
           train_names:       trains,
@@ -213,6 +213,29 @@ module TrainDelayMetrics
     def self.format_peak_cell(peak)
       return "-" unless peak && peak.scheduled.positive?
       format("%s %3d%%", peak.center_hhmm, peak.percentage.round)
+    end
+
+    # Group title for `train-delay --input`. Uses the new `from`/`to`/`stations`
+    # keys when present (writing them is now the default in trains-by-station)
+    # so the title reads "<from-stations> -> <to-stations>". Falls back to a
+    # bare EVA list for older JSON files that lack those keys.
+    def self.format_group_title(g, evas)
+      from_evas = Array(g["from"]).map(&:to_s)
+      to_evas   = Array(g["to"]).map(&:to_s)
+      stations  = g["stations"].is_a?(Hash) ? g["stations"] : {}
+      label     = ->(e) { (n = stations[e]) && !n.empty? ? "#{n} (#{e})" : e }
+
+      # Legacy file with no side info — preserve old behaviour (no train count).
+      return "EVAs #{evas.map(&label).join(', ')}" if from_evas.empty? && to_evas.empty?
+
+      from_part = from_evas.map(&label).join(", ")
+      to_only   = to_evas.reject { |e| from_evas.include?(e) }
+      to_part   = to_only.map(&label).join(", ")
+
+      if from_part.empty? then to_part
+      elsif to_part.empty? then from_part
+      else "#{from_part} -> #{to_part}"
+      end
     end
   end
 end

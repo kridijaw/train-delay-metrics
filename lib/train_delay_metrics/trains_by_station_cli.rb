@@ -165,7 +165,15 @@ module TrainDelayMetrics
       end
 
       if options[:out]
-        groups = rows.map { |r| { "evas" => [r.eva], "trains" => r.trains } }
+        groups = rows.map do |r|
+          {
+            "evas"     => [r.eva],
+            "from"     => from_set.include?(r.eva) ? [r.eva] : [],
+            "to"       => to_set.include?(r.eva)   ? [r.eva] : [],
+            "stations" => r.station_name ? { r.eva => r.station_name } : {},
+            "trains"   => r.trains
+          }
+        end
         write_out(stdout, resolve_out_path(options), groups)
       end
       0
@@ -266,7 +274,13 @@ module TrainDelayMetrics
       if options[:out]
         json_groups = sorted_groups.map do |evas|
           trains = groups[evas].map(&:train_name).sort_by { |n| TrainName.sort_key(n) }
-          { "evas" => evas, "trains" => trains }
+          {
+            "evas"     => evas,
+            "from"     => evas.select { |e| from_set.include?(e) },
+            "to"       => evas.select { |e| to_set.include?(e) },
+            "stations" => evas.each_with_object({}) { |e, h| n = eva_to_name[e]; h[e] = n if n },
+            "trains"   => trains
+          }
         end
         write_out(stdout, resolve_out_path(options), json_groups)
       end
