@@ -7,9 +7,10 @@ module TrainDelayMetrics
   class TrainsByStationCLI
     def self.run(argv, stdout: $stdout, stderr: $stderr)
       options = {
-        years_back:    nil,
-        exclude_types: [],
-        parquet_glob:  Query::DEFAULT_GLOB
+        years_back:     nil,
+        exclude_types:  [],
+        group_by_stops: false,
+        parquet_glob:   Query::DEFAULT_GLOB
       }
 
       parser = OptionParser.new do |o|
@@ -23,6 +24,7 @@ module TrainDelayMetrics
         o.on("--to LIST",   Array, "Destination EVA(s), comma-separated") { |v| options[:to_evas] = v }
         o.on("--years N", Integer, "Years of history (default: all available data)") { |v| options[:years_back] = v }
         o.on("--exclude-types LIST", Array, %q{Exclude train_types (case-insensitive), e.g. --exclude-types FLX,DPF}) { |v| options[:exclude_types] = v }
+        o.on("--group-by-stops", "Group trains by the exact set of from/to EVAs they touch instead of listing per EVA") { options[:group_by_stops] = true }
         o.on("--data GLOB", "Parquet glob (default #{Query::DEFAULT_GLOB})") { |v| options[:parquet_glob] = v }
         o.on("-h", "--help") { stdout.puts o; return 0 }
       end
@@ -51,6 +53,13 @@ module TrainDelayMetrics
         end
       stdout.puts "Window: #{window_from} -> #{window_to}#{options[:years_back] ? " (--years #{options[:years_back]})" : " (full dataset)"}"
 
+      from_set = options[:from_evas]
+      to_set   = options[:to_evas]
+
+      if options[:group_by_stops]
+        return print_grouped(stdout, svc, options, from_set, to_set)
+      end
+
       rows = svc.trains_by_station(
         from_eva:      options[:from_evas],
         to_eva:        options[:to_evas],
@@ -63,8 +72,6 @@ module TrainDelayMetrics
         return 0
       end
 
-      from_set = options[:from_evas]
-      to_set   = options[:to_evas]
       rows = rows.sort_by { |r| [from_set.include?(r.eva) ? 0 : 1, r.eva] }
       name_w   = [rows.map { |r| (r.station_name || "").length }.max, 7].max
       term_w   = terminal_width
@@ -80,6 +87,53 @@ module TrainDelayMetrics
         lines = wrap_join(r.trains, ", ", trains_w)
         stdout.puts format("%-8s  %-7s  %-#{name_w}s  %s", r.eva, side.join("/"), r.station_name.to_s, lines.first)
         lines.drop(1).each { |l| stdout.puts (" " * prefix_w) + l }
+      end
+      0
+    end
+
+    def self.print_grouped(stdout, svc, options, from_set, to_set)
+      coverage = svc.train_coverage(
+        from_eva:      options[:from_evas],
+        to_eva:        options[:to_evas],
+        years_back:    options[:years_back],
+        exclude_types: options[:exclude_types]
+      )
+      if coverage.empty?
+        stdout.puts "No matching trains for the given from/to."
+        return 0
+      end
+
+      station_rows = svc.trains_by_station(
+        from_eva:      options[:from_evas],
+        to_eva:        options[:to_evas],
+        years_back:    options[:years_back],
+        exclude_types: options[:exclude_types]
+      )
+      eva_to_name = station_rows.each_with_object({}) { |r, h| h[r.eva] = r.station_name }
+
+      groups = coverage.group_by { |c| c.evas }
+      sorted_groups = groups.keys.sort_by do |evas|
+        from_count = evas.count { |e| from_set.include?(e) }
+        to_count   = evas.count { |e| to_set.include?(e) }
+        # Largest coverage first; within that, more from-EVAs first; then EVA list.
+        [-evas.size, -from_count, -to_count, evas]
+      end
+
+      term_w = terminal_width
+      sorted_groups.each_with_index do |evas, i|
+        trains = groups[evas].map(&:train_name).sort_by { |n| TrainName.sort_key(n) }
+        header = evas.map do |e|
+          side = []
+          side << "from" if from_set.include?(e)
+          side << "to"   if to_set.include?(e)
+          name = eva_to_name[e]
+          "#{e} #{name ? "(#{name}, #{side.join('/')})" : "(#{side.join('/')})"}"
+        end.join("  +  ")
+
+        stdout.puts if i > 0
+        stdout.puts "Group: #{header}"
+        stdout.puts "  #{trains.size} train#{'s' unless trains.size == 1}:"
+        wrap_join(trains, ", ", [term_w - 4, 20].max).each { |l| stdout.puts "    #{l}" }
       end
       0
     end

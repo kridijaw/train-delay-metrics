@@ -113,6 +113,24 @@ bundle exec bin/trains-by-station --from 08000105,08098105 --to 08000207,0809820
 
 For each EVA in the union of `--from` / `--to`, prints the alphabetically sorted list of trains that touch that EVA *and* connect any from-EVA to any to-EVA in the window. The `Side` column shows whether the EVA came from `--from`, `--to`, or both. Useful for figuring out which platform-group EVAs (e.g. S-Bahn `08098xxx` vs long-distance `08000xxx`) each train uses. `--exclude-types` drops train types like `FLX` (FlixTrain) before grouping.
 
+`--group-by-stops` flips the layout: instead of one row per EVA, prints one block per *coverage set* — the exact subset of from/to EVAs each train touches. Each train appears in exactly one group (the largest subset that fully matches its observed stops). Useful for separating trains that stop at, say, both Berlin Hbf and Berlin Gesundbrunnen from those that only stop at one.
+
+```sh
+bundle exec bin/trains-by-station --from 08011160,08011102 --to 08000105,08000207 --years 1 --group-by-stops
+```
+
+```
+Group: 08000105 (Frankfurt (Main) Hbf, to)  +  08000207 (Köln Hbf, to)  +  08011160 (Berlin Hauptbahnhof, from)
+  1 train:
+    ICE 1148
+
+Group: 08000105 (Frankfurt (Main) Hbf, to)  +  08011102 (Berlin Gesundbrunnen, from)
+  20 trains:
+    ICE 593, ICE 595, ...
+```
+
+Groups are sorted by coverage size (largest first), then by from-EVA count, then by EVA list.
+
 ```
 EVA       Side     Station               Trains
 ---------------------------------------------------------------------------------

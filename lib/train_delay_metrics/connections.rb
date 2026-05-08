@@ -56,6 +56,19 @@ module TrainDelayMetrics
       end
     end
 
+    TrainCoverage = Struct.new(:train_name, :evas, keyword_init: true)
+
+    # For each connecting train_name, returns the sorted list of from/to EVAs
+    # it ever stops at across the window. Useful for bucketing trains by which
+    # combination of stops they cover.
+    def train_coverage(from_eva:, to_eva:, years_back: nil, exclude_types: nil)
+      sql, binds = build_sql(from_eva: from_eva, to_eva: to_eva, years_back: years_back, exclude_types: exclude_types, select: :coverage)
+      stmt = bind(connection.prepared_statement(sql), binds)
+      stmt.execute.map do |row|
+        TrainCoverage.new(train_name: row[0], evas: row[1] || [])
+      end
+    end
+
     # Returns [min_date, max_date] (Date objects) of the planned timestamps
     # in the parquet glob, or [nil, nil] if there is no data.
     def data_date_range
@@ -122,6 +135,26 @@ module TrainDelayMetrics
                   FROM stops s JOIN matching_rides m USING (train_line_ride_id)
                   GROUP BY s.eva
                   ORDER BY s.eva;
+                SQL
+              when :coverage
+                <<~SQL
+                  , matching_rides AS (
+                    SELECT DISTINCT a.train_line_ride_id, a.train_name
+                    FROM stops a JOIN stops b
+                      ON a.train_line_ride_id = b.train_line_ride_id
+                     AND b.arr >= a.dep
+                     AND b.arr <= a.dep + INTERVAL #{MAX_JOURNEY_HOURS} HOUR
+                    WHERE a.eva IN (#{from_placeholders})
+                      AND b.eva IN (#{to_placeholders})
+                      AND a.station_num < b.station_num
+                      AND a.dep IS NOT NULL
+                      AND b.arr IS NOT NULL
+                  )
+                  SELECT m.train_name,
+                         list(DISTINCT s.eva ORDER BY s.eva) AS evas
+                  FROM stops s JOIN matching_rides m USING (train_line_ride_id)
+                  GROUP BY m.train_name
+                  ORDER BY m.train_name;
                 SQL
               when :full
                 <<~SQL
