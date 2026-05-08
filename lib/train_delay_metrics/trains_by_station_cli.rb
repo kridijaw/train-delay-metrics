@@ -29,13 +29,21 @@ module TrainDelayMetrics
   sorted list of trains that touch that EVA and connect any from-EVA to
   any to-EVA in the window. Useful for seeing which platform-group EVAs
   each train uses.}
-        o.on("--from SPEC", "Origin EVA(s): comma-separated list or @FILE") do |v|
+        o.on("--from SPEC", %q{Origin EVA(s): comma-separated list, @FILE, or "all" to expand to every out/station_*.txt}) do |v|
           options[:from_spec] = v
-          options[:from_evas] = parse_eva_spec(v, "--from", stderr) or return 1
+          if v == "all"
+            options[:from_all] = true
+          else
+            options[:from_evas] = parse_eva_spec(v, "--from", stderr) or return 1
+          end
         end
-        o.on("--to SPEC",   "Destination EVA(s): comma-separated list or @FILE") do |v|
-          options[:to_spec]  = v
-          options[:to_evas]  = parse_eva_spec(v, "--to", stderr) or return 1
+        o.on("--to SPEC", %q{Destination EVA(s): comma-separated list, @FILE, or "all" to expand to every out/station_*.txt}) do |v|
+          options[:to_spec] = v
+          if v == "all"
+            options[:to_all] = true
+          else
+            options[:to_evas] = parse_eva_spec(v, "--to", stderr) or return 1
+          end
         end
         o.on("--years N", Integer, "Years of history (default: all available data)") { |v| options[:years_back] = v }
         o.on("--exclude-types LIST", Array, %q{Exclude train_types (case-insensitive), e.g. --exclude-types FLX,DPF}) { |v| options[:exclude_types] = v }
@@ -50,9 +58,13 @@ module TrainDelayMetrics
       end
       parser.parse!(argv)
 
-      missing = %i[from_evas to_evas].select { |k| options[k].nil? || options[k].empty? }
-      unless missing.empty?
-        stderr.puts "Missing required option(s): #{missing.map { |k| "--#{k.to_s.split('_').first}" }.join(', ')}"
+      from_missing = options[:from_spec].nil?
+      to_missing   = options[:to_spec].nil?
+      if from_missing || to_missing
+        missing = []
+        missing << "--from" if from_missing
+        missing << "--to"   if to_missing
+        stderr.puts "Missing required option(s): #{missing.join(', ')}"
         stderr.puts parser
         return 1
       end
@@ -71,17 +83,57 @@ module TrainDelayMetrics
           min_d, max_d = svc.data_date_range
           [min_d&.to_s || "(none)", max_d&.to_s || "(none)"]
         end
-      stdout.puts "Window: #{window_from} -> #{window_to}#{options[:years_back] ? " (--years #{options[:years_back]})" : " (full dataset)"}"
+      window_line = "Window: #{window_from} -> #{window_to}#{options[:years_back] ? " (--years #{options[:years_back]})" : " (full dataset)"}"
 
+      from_specs = expand_specs(options, :from, stderr) or return 1
+      to_specs   = expand_specs(options, :to, stderr) or return 1
+      pairs = from_specs.product(to_specs).reject { |f, t| f == t }
+
+      if pairs.empty?
+        stderr.puts "No from/to pairs to run (after skipping equal pairs)."
+        return 1
+      end
+
+      multi = pairs.size > 1
+      stdout.puts window_line
+      pairs.each_with_index do |(from_spec, to_spec), i|
+        per_options = options.merge(from_spec: from_spec, to_spec: to_spec)
+        per_options[:from_evas] = parse_eva_spec(from_spec, "--from", stderr) or return 1
+        per_options[:to_evas]   = parse_eva_spec(to_spec,   "--to",   stderr) or return 1
+
+        if multi
+          stdout.puts if i > 0
+          stdout.puts "=== #{from_spec} -> #{to_spec} ==="
+        end
+
+        run_one(stdout, svc, per_options)
+      end
+      0
+    end
+
+    # Returns [spec, ...] for the given side; if --<side> all was passed,
+    # expands to one @FILE spec per matching out/station_*.txt. Returns nil
+    # after printing an error if "all" matches no files.
+    def self.expand_specs(options, side, stderr)
+      if options[:"#{side}_all"]
+        files = Dir.glob(File.join(OUT_DIR, "station_*.txt")).sort
+        if files.empty?
+          stderr.puts %{--#{side} all: no station_*.txt files found in #{OUT_DIR}/. Run find-train-stations --out first.}
+          return nil
+        end
+        files.map { |p| "@#{File.basename(p)}" }
+      else
+        [options[:"#{side}_spec"]]
+      end
+    end
+
+    def self.run_one(stdout, svc, options)
       from_set = options[:from_evas]
       to_set   = options[:to_evas]
 
       if options[:group_by_stops]
         return print_grouped(stdout, svc, options, from_set, to_set)
       end
-
-      # When --out is set without --group-by-stops, the per-EVA listing is
-      # also serialised so each EVA becomes its own group of one.
 
       rows = svc.trains_by_station(
         from_eva:      options[:from_evas],

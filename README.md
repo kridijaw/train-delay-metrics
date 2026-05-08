@@ -117,6 +117,16 @@ bundle exec bin/trains-by-station --from 08000105,08098105 --to 08000207,0809820
 
 `--from` / `--to` accept either a comma-separated EVA list or `@FILE` to read newline-separated EVAs from a file (bare filenames are resolved against `out/`, so e.g. `--to @frankfurt-evas.txt` consumes a list produced by `find-train-stations --out`).
 
+Either side can also be the literal `all`, which expands to every `out/station_*.txt` file. Combined with the other side it iterates the cartesian product, skipping pairs where from and to are the same file. With `--out` (auto-derived), each pair writes its own JSON file. Useful for batch-generating delay queries across many station combinations.
+
+```sh
+bundle exec bin/find-train-stations berlin --types ICE --out
+bundle exec bin/find-train-stations regensburg --types ICE --out
+bundle exec bin/find-train-stations koeln --types ICE --out
+bundle exec bin/trains-by-station --from all --to all --years 1 --group-by-stops --out
+# → out/station_berlin_to_station_regensburg.json, out/station_berlin_to_station_koeln.json, ...
+```
+
 For each EVA in the union of `--from` / `--to`, prints the alphabetically sorted list of trains that touch that EVA *and* connect any from-EVA to any to-EVA in the window. The `Side` column shows whether the EVA came from `--from`, `--to`, or both. Useful for figuring out which platform-group EVAs (e.g. S-Bahn `08098xxx` vs long-distance `08000xxx`) each train uses. `--exclude-types` drops train types like `FLX` (FlixTrain) before grouping.
 
 `--group-by-stops` flips the layout: instead of one row per EVA, prints one block per *coverage set* — the exact subset of from/to EVAs each train touches. Each train appears in exactly one group (the largest subset that fully matches its observed stops). Useful for separating trains that stop at, say, both Berlin Hbf and Berlin Gesundbrunnen from those that only stop at one.
