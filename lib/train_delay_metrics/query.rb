@@ -21,20 +21,26 @@ module TrainDelayMetrics
     def run(train_name:, station_eva:, threshold_minutes:, years_back:)
       results = run_many(
         train_names:       [train_name],
-        station_eva:       station_eva,
+        station_evas:      [station_eva],
         threshold_minutes: threshold_minutes,
         years_back:        years_back
       )
       results.first || Result.new(train_name: train_name.to_s, total_trips: 0, delayed_trips: 0, delay_percentage: nil)
     end
 
-    # Computes delay statistics for one or more trains at the same station.
+    # Computes delay statistics for one or more trains across one or more
+    # stations. Pass either station_eva: (single) or station_evas: (list).
     # Returns an array of Result, ordered by delay_percentage DESC (NULL last).
-    def run_many(train_names:, station_eva:, threshold_minutes:, years_back:)
+    def run_many(train_names:, station_eva: nil, station_evas: nil, threshold_minutes:, years_back:)
       names = Array(train_names).map(&:to_s).reject(&:empty?)
       raise ArgumentError, "train_names must not be empty" if names.empty?
 
-      placeholders = (["?"] * names.size).join(", ")
+      evas = Array(station_evas).map(&:to_s).reject(&:empty?)
+      evas = [station_eva.to_s] if evas.empty? && station_eva
+      raise ArgumentError, "station_eva or station_evas must be provided" if evas.empty?
+
+      train_placeholders = (["?"] * names.size).join(", ")
+      eva_placeholders   = (["?"] * evas.size).join(", ")
 
       sql = <<~SQL
         SELECT train_name,
@@ -44,8 +50,8 @@ module TrainDelayMetrics
                     ELSE 100.0 * COUNT(*) FILTER (WHERE delay_in_min >= ?) / COUNT(*)
                END                                                       AS delay_percentage
         FROM read_parquet(?)
-        WHERE train_name IN (#{placeholders})
-          AND eva = ?
+        WHERE train_name IN (#{train_placeholders})
+          AND eva IN (#{eva_placeholders})
           AND arrival_planned_time IS NOT NULL
           AND is_canceled = FALSE
           AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 YEAR) * ?
@@ -53,7 +59,7 @@ module TrainDelayMetrics
       SQL
 
       stmt = connection.prepared_statement(sql)
-      binds = [threshold_minutes, threshold_minutes, @parquet_glob, *names, station_eva.to_s, years_back]
+      binds = [threshold_minutes, threshold_minutes, @parquet_glob, *names, *evas, years_back]
       binds.each_with_index { |v, i| stmt.bind(i + 1, v) }
 
       seen = {}

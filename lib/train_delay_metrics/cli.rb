@@ -1,3 +1,4 @@
+require "json"
 require "optparse"
 require_relative "query"
 
@@ -8,15 +9,21 @@ module TrainDelayMetrics
         threshold_minutes: 20,
         years_back:        3,
         parquet_glob:      Query::DEFAULT_GLOB,
-        train_names:       []
+        train_names:       [],
+        input_file:        nil
       }
 
       parser = OptionParser.new do |o|
         o.banner = %q{Usage: train-delay --train NAME[,NAME...] --station EVA [options]
+                  train-delay --input FILE [options]
 
   --train accepts either a comma-separated list ("ICE 802,ICE 821") or
-  @FILE to read newline-separated names from FILE, e.g. one produced by
-  `train-connections --unique --out trains.txt`.}
+  @FILE to read newline-separated names from FILE.
+
+  --input replaces both --train and --station: it reads a JSON file written by
+  `trains-by-station --out`, where each entry maps a list of EVAs to a list of
+  trains. The delay query runs once per group, with delay measured at any of
+  the group's EVAs.}
         o.on("--train SPEC", %q{Train name(s): comma-separated list or @FILE (bare names also resolved against out/)}) do |v|
           if v.start_with?("@")
             raw  = v[1..]
@@ -31,6 +38,14 @@ module TrainDelayMetrics
           end
         end
         o.on("--station EVA",  "EVA station number, e.g. 8000105 (Frankfurt Hbf)") { |v| options[:station_eva] = v }
+        o.on("--input FILE",   "JSON file from `trains-by-station --out` (bare names also resolved against out/). Replaces --train/--station.") do |v|
+          path = FileInput.resolve(v)
+          unless path
+            stderr.puts "Input file not found: #{v} (also tried out/#{v})"
+            return 1
+          end
+          options[:input_file] = path
+        end
         o.on("--threshold-minutes N", Integer, "Delay threshold in minutes (default 20)") { |v| options[:threshold_minutes] = v }
         o.on("--years N", Integer, "Years of history to consider (default 3)") { |v| options[:years_back] = v }
         o.on("--data GLOB", "Parquet glob (default #{Query::DEFAULT_GLOB})") { |v| options[:parquet_glob] = v }
@@ -38,13 +53,20 @@ module TrainDelayMetrics
       end
       parser.parse!(argv)
 
-      if options[:train_names].empty? || options[:station_eva].nil?
-        missing = []
-        missing << "--train"   if options[:train_names].empty?
-        missing << "--station" if options[:station_eva].nil?
-        stderr.puts "Missing required option(s): #{missing.join(', ')}"
-        stderr.puts parser
-        return 1
+      if options[:input_file]
+        if !options[:train_names].empty? || options[:station_eva]
+          stderr.puts "--input cannot be combined with --train/--station."
+          return 1
+        end
+      else
+        if options[:train_names].empty? || options[:station_eva].nil?
+          missing = []
+          missing << "--train"   if options[:train_names].empty?
+          missing << "--station" if options[:station_eva].nil?
+          stderr.puts "Missing required option(s): #{missing.join(', ')} (or use --input FILE)"
+          stderr.puts parser
+          return 1
+        end
       end
 
       if Dir.glob(options[:parquet_glob]).empty?
@@ -52,7 +74,13 @@ module TrainDelayMetrics
         return 2
       end
 
-      results = Query.new(parquet_glob: options[:parquet_glob]).run_many(
+      query = Query.new(parquet_glob: options[:parquet_glob])
+
+      if options[:input_file]
+        return run_input(stdout, stderr, query, options)
+      end
+
+      results = query.run_many(
         train_names:       options[:train_names],
         station_eva:       options[:station_eva],
         threshold_minutes: options[:threshold_minutes],
@@ -72,6 +100,40 @@ module TrainDelayMetrics
       0
     end
 
+    def self.run_input(stdout, stderr, query, options)
+      groups = JSON.parse(File.read(options[:input_file]))
+      unless groups.is_a?(Array)
+        stderr.puts "Expected a JSON array in #{options[:input_file]}."
+        return 1
+      end
+
+      groups.each_with_index do |g, i|
+        evas   = Array(g["evas"]).map(&:to_s)
+        trains = Array(g["trains"]).map(&:to_s)
+        if evas.empty? || trains.empty?
+          stderr.puts "Skipping group #{i + 1}: missing evas or trains."
+          next
+        end
+
+        stdout.puts if i > 0
+        stdout.puts "Group #{i + 1}: EVAs #{evas.join(', ')}  (#{trains.size} train#{'s' unless trains.size == 1})"
+
+        results = query.run_many(
+          train_names:       trains,
+          station_evas:      evas,
+          threshold_minutes: options[:threshold_minutes],
+          years_back:        options[:years_back]
+        )
+        with_data = results.reject { |r| r.total_trips.zero? }
+        if with_data.empty?
+          stdout.puts "  No trips found in the last #{options[:years_back]} year(s)."
+        else
+          print_table(stdout, with_data, options, indent: "  ")
+        end
+      end
+      0
+    end
+
     def self.print_single(stdout, r, options)
       if r.total_trips.zero?
         stdout.puts %{No trips found for "#{r.train_name}" at EVA #{options[:station_eva]} in the last #{options[:years_back]} year(s).}
@@ -82,15 +144,15 @@ module TrainDelayMetrics
       stdout.puts "Delay probability:               #{format('%.2f', r.delay_percentage)}%"
     end
 
-    def self.print_table(stdout, results, options)
+    def self.print_table(stdout, results, options, indent: "")
       name_w = [results.map { |r| r.train_name.to_s.length }.max, 5].max
-      stdout.puts format("%-#{name_w}s  %7s  %7s  %7s",
-                         "Train", "Trips", "Delay#{options[:threshold_minutes]}+", "Prob%")
-      stdout.puts "-" * (name_w + 2 + 7 + 2 + 7 + 2 + 7)
+      stdout.puts indent + format("%-#{name_w}s  %7s  %7s  %7s",
+                                  "Train", "Trips", "Delay#{options[:threshold_minutes]}+", "Prob%")
+      stdout.puts indent + "-" * (name_w + 2 + 7 + 2 + 7 + 2 + 7)
       results.each do |r|
         prob = r.delay_percentage ? format("%.2f", r.delay_percentage) : "-"
-        stdout.puts format("%-#{name_w}s  %7d  %7d  %7s",
-                           r.train_name, r.total_trips, r.delayed_trips, prob)
+        stdout.puts indent + format("%-#{name_w}s  %7d  %7d  %7s",
+                                    r.train_name, r.total_trips, r.delayed_trips, prob)
       end
     end
   end

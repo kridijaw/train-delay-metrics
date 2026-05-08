@@ -1,15 +1,20 @@
 require "date"
+require "fileutils"
 require "io/console"
+require "json"
 require "optparse"
 require_relative "connections"
 
 module TrainDelayMetrics
   class TrainsByStationCLI
+    OUT_DIR = "out".freeze
+
     def self.run(argv, stdout: $stdout, stderr: $stderr)
       options = {
         years_back:     nil,
         exclude_types:  [],
         group_by_stops: false,
+        out:            nil,
         parquet_glob:   Query::DEFAULT_GLOB
       }
 
@@ -33,6 +38,7 @@ module TrainDelayMetrics
         o.on("--years N", Integer, "Years of history (default: all available data)") { |v| options[:years_back] = v }
         o.on("--exclude-types LIST", Array, %q{Exclude train_types (case-insensitive), e.g. --exclude-types FLX,DPF}) { |v| options[:exclude_types] = v }
         o.on("--group-by-stops", "Group trains by the exact set of from/to EVAs they touch instead of listing per EVA") { options[:group_by_stops] = true }
+        o.on("--out FILE", "Also write the EVAs↔trains mapping to FILE as JSON. Bare filenames are saved under #{OUT_DIR}/. Consumable by `train-delay --input`.") { |v| options[:out] = v }
         o.on("--data GLOB", "Parquet glob (default #{Query::DEFAULT_GLOB})") { |v| options[:parquet_glob] = v }
         o.on("-h", "--help") { stdout.puts o; return 0 }
       end
@@ -68,6 +74,9 @@ module TrainDelayMetrics
         return print_grouped(stdout, svc, options, from_set, to_set)
       end
 
+      # When --out is set without --group-by-stops, the per-EVA listing is
+      # also serialised so each EVA becomes its own group of one.
+
       rows = svc.trains_by_station(
         from_eva:      options[:from_evas],
         to_eva:        options[:to_evas],
@@ -96,7 +105,20 @@ module TrainDelayMetrics
         stdout.puts format("%-8s  %-7s  %-#{name_w}s  %s", r.eva, side.join("/"), r.station_name.to_s, lines.first)
         lines.drop(1).each { |l| stdout.puts (" " * prefix_w) + l }
       end
+
+      if options[:out]
+        groups = rows.map { |r| { "evas" => [r.eva], "trains" => r.trains } }
+        write_out(stdout, options[:out], groups)
+      end
       0
+    end
+
+    def self.write_out(stdout, out_path, groups)
+      path = out_path.include?(File::SEPARATOR) ? out_path : File.join(OUT_DIR, out_path)
+      FileUtils.mkdir_p(File.dirname(path))
+      File.write(path, JSON.pretty_generate(groups) + "\n")
+      total_trains = groups.sum { |g| g["trains"].size }
+      stdout.puts "Wrote #{groups.size} group#{'s' unless groups.size == 1} (#{total_trains} train mapping#{'s' unless total_trains == 1}) to #{path}."
     end
 
     def self.print_grouped(stdout, svc, options, from_set, to_set)
@@ -164,6 +186,14 @@ module TrainDelayMetrics
           stdout.puts format("%-#{side_w}s  %-#{eva_w}s  %-#{station_w}s  %s",
                              side_cell, eva_cell, station_cell, train_cell)
         end
+      end
+
+      if options[:out]
+        json_groups = sorted_groups.map do |evas|
+          trains = groups[evas].map(&:train_name).sort_by { |n| TrainName.sort_key(n) }
+          { "evas" => evas, "trains" => trains }
+        end
+        write_out(stdout, options[:out], json_groups)
       end
       0
     end

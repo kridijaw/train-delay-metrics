@@ -43,6 +43,8 @@ Delay probability:               23.51%
 
 With multiple `--train` values the output switches to a compact table sorted by delay probability descending. Trains with no observed trips in the window are omitted.
 
+`--input FILE` replaces both `--train` and `--station`: it reads a JSON file written by `trains-by-station --out` (bare names resolved against `out/`) and runs the delay query once per `{evas, trains}` group, measuring delay at any of the group's EVAs.
+
 `--train` also accepts `@FILE` to read newline-separated train names from a file — for example a list produced by `bin/get-trains --out`. Bare filenames are resolved against the current directory first, then against `out/`, so a file written by `get-trains` round-trips without retyping the path:
 
 ```sh
@@ -117,6 +119,13 @@ bundle exec bin/trains-by-station --from 08000105,08098105 --to 08000207,0809820
 For each EVA in the union of `--from` / `--to`, prints the alphabetically sorted list of trains that touch that EVA *and* connect any from-EVA to any to-EVA in the window. The `Side` column shows whether the EVA came from `--from`, `--to`, or both. Useful for figuring out which platform-group EVAs (e.g. S-Bahn `08098xxx` vs long-distance `08000xxx`) each train uses. `--exclude-types` drops train types like `FLX` (FlixTrain) before grouping.
 
 `--group-by-stops` flips the layout: instead of one row per EVA, prints one block per *coverage set* — the exact subset of from/to EVAs each train touches. Each train appears in exactly one group (the largest subset that fully matches its observed stops). Useful for separating trains that stop at, say, both Berlin Hbf and Berlin Gesundbrunnen from those that only stop at one.
+
+`--out FILE` additionally serialises the EVAs↔trains mapping to JSON (bare names land under `out/`). Each entry is `{ "evas": [...], "trains": [...] }`. `train-delay --input FILE` consumes this format and runs the delay query once per group, measuring delay at any of the group's EVAs:
+
+```sh
+bundle exec bin/trains-by-station --from 08011160,08011102 --to 08000105,08000207 --group-by-stops --out berlin.json
+bundle exec bin/train-delay --input berlin.json --years 1 --threshold-minutes 20
+```
 
 ```sh
 bundle exec bin/trains-by-station --from 08011160,08011102 --to 08000105,08000207 --years 1 --group-by-stops
