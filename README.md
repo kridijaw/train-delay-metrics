@@ -41,7 +41,14 @@ Trips delayed >= 20 min:         146
 Delay probability:               23.51%
 ```
 
-With multiple `--train` values the output switches to a compact table sorted by delay probability descending; trains with no data appear last with `-`.
+With multiple `--train` values the output switches to a compact table sorted by delay probability descending. Trains with no observed trips in the window are omitted.
+
+`--train` also accepts `@FILE` to read newline-separated train names from a file — for example a list produced by `train-connections --unique --out trains.txt`:
+
+```sh
+bundle exec bin/train-connections --from 08000105 --to 08000207 --unique --out trains.txt
+bundle exec bin/train-delay --train @trains.txt --station 08000207 --threshold-minutes 20
+```
 
 ### Look up a station's EVA(s) and train types
 

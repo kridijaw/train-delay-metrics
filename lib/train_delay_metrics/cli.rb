@@ -61,7 +61,12 @@ module TrainDelayMetrics
       if results.size == 1
         print_single(stdout, results.first, options)
       else
-        print_table(stdout, results, options)
+        with_data = results.reject { |r| r.total_trips.zero? }
+        if with_data.empty?
+          stdout.puts %{No trips found for any of the requested trains at EVA #{options[:station_eva]} in the last #{options[:years_back]} year(s).}
+        else
+          print_table(stdout, with_data, options)
+        end
       end
       0
     end
