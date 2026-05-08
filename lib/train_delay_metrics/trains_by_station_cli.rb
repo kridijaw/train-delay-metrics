@@ -14,14 +14,22 @@ module TrainDelayMetrics
       }
 
       parser = OptionParser.new do |o|
-        o.banner = %q{Usage: trains-by-station --from EVA[,EVA...] --to EVA[,EVA...] [options]
+        o.banner = %q{Usage: trains-by-station --from SPEC --to SPEC [options]
+
+  --from / --to accept either a comma-separated EVA list ("08000105,08098105")
+  or @FILE to read newline-separated EVAs from a file (bare names also
+  resolved against out/, e.g. those produced by find-train-stations --out).
 
   For each EVA in the union of --from / --to, prints the alphabetically
   sorted list of trains that touch that EVA and connect any from-EVA to
   any to-EVA in the window. Useful for seeing which platform-group EVAs
   each train uses.}
-        o.on("--from LIST", Array, "Origin EVA(s), comma-separated") { |v| options[:from_evas] = v }
-        o.on("--to LIST",   Array, "Destination EVA(s), comma-separated") { |v| options[:to_evas] = v }
+        o.on("--from SPEC", "Origin EVA(s): comma-separated list or @FILE") do |v|
+          options[:from_evas] = parse_eva_spec(v, "--from", stderr) or return 1
+        end
+        o.on("--to SPEC",   "Destination EVA(s): comma-separated list or @FILE") do |v|
+          options[:to_evas] = parse_eva_spec(v, "--to", stderr) or return 1
+        end
         o.on("--years N", Integer, "Years of history (default: all available data)") { |v| options[:years_back] = v }
         o.on("--exclude-types LIST", Array, %q{Exclude train_types (case-insensitive), e.g. --exclude-types FLX,DPF}) { |v| options[:exclude_types] = v }
         o.on("--group-by-stops", "Group trains by the exact set of from/to EVAs they touch instead of listing per EVA") { options[:group_by_stops] = true }
@@ -158,6 +166,23 @@ module TrainDelayMetrics
         end
       end
       0
+    end
+
+    # Parses a --from / --to value: either a comma-separated EVA list or
+    # @FILE (file path resolved literally first, then under out/).
+    # Returns the EVA array on success or nil after printing an error.
+    def self.parse_eva_spec(value, flag, stderr)
+      if value.start_with?("@")
+        raw  = value[1..]
+        path = FileInput.resolve(raw)
+        unless path
+          stderr.puts "#{flag} file not found: #{raw} (also tried out/#{raw})"
+          return nil
+        end
+        FileInput.read_lines(path)
+      else
+        value.split(",").map(&:strip).reject(&:empty?)
+      end
     end
 
     def self.terminal_width

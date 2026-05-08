@@ -43,10 +43,10 @@ Delay probability:               23.51%
 
 With multiple `--train` values the output switches to a compact table sorted by delay probability descending. Trains with no observed trips in the window are omitted.
 
-`--train` also accepts `@FILE` to read newline-separated train names from a file — for example a list produced by `bin/get-trains --out`:
+`--train` also accepts `@FILE` to read newline-separated train names from a file — for example a list produced by `bin/get-trains --out`. Bare filenames are resolved against the current directory first, then against `out/`, so a file written by `get-trains` round-trips without retyping the path:
 
 ```sh
-bundle exec bin/get-trains --from 08000105 --to 08000207 --out trains.txt
+bundle exec bin/get-trains --from 08000105 --to 08000207 --out trains.txt   # writes out/trains.txt
 bundle exec bin/train-delay --train @trains.txt --station 08000207 --threshold-minutes 20
 ```
 
@@ -111,6 +111,8 @@ Prints an alphabetically sorted, deduplicated list of `train_name` values that c
 bundle exec bin/trains-by-station --from 08000105,08098105 --to 08000207,08098207
 bundle exec bin/trains-by-station --from 08000105,08098105 --to 08000207,08098207 --exclude-types FLX
 ```
+
+`--from` / `--to` accept either a comma-separated EVA list or `@FILE` to read newline-separated EVAs from a file (bare filenames are resolved against `out/`, so e.g. `--to @frankfurt-evas.txt` consumes a list produced by `find-train-stations --out`).
 
 For each EVA in the union of `--from` / `--to`, prints the alphabetically sorted list of trains that touch that EVA *and* connect any from-EVA to any to-EVA in the window. The `Side` column shows whether the EVA came from `--from`, `--to`, or both. Useful for figuring out which platform-group EVAs (e.g. S-Bahn `08098xxx` vs long-distance `08000xxx`) each train uses. `--exclude-types` drops train types like `FLX` (FlixTrain) before grouping.
 

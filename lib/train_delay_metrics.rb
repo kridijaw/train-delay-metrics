@@ -1,3 +1,4 @@
+require_relative "train_delay_metrics/file_input"
 require_relative "train_delay_metrics/train_name"
 require_relative "train_delay_metrics/query"
 require_relative "train_delay_metrics/connections"

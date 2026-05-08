@@ -17,14 +17,15 @@ module TrainDelayMetrics
   --train accepts either a comma-separated list ("ICE 802,ICE 821") or
   @FILE to read newline-separated names from FILE, e.g. one produced by
   `train-connections --unique --out trains.txt`.}
-        o.on("--train SPEC", %q{Train name(s): comma-separated list or @FILE}) do |v|
+        o.on("--train SPEC", %q{Train name(s): comma-separated list or @FILE (bare names also resolved against out/)}) do |v|
           if v.start_with?("@")
-            path = v[1..]
-            unless File.exist?(path)
-              stderr.puts "Train list file not found: #{path}"
+            raw  = v[1..]
+            path = FileInput.resolve(raw)
+            unless path
+              stderr.puts "Train list file not found: #{raw} (also tried out/#{raw})"
               return 1
             end
-            options[:train_names] = File.readlines(path, chomp: true).map(&:strip).reject(&:empty?)
+            options[:train_names] = FileInput.read_lines(path)
           else
             options[:train_names] = v.split(",").map(&:strip).reject(&:empty?)
           end
