@@ -57,6 +57,27 @@ RSpec.describe TrainDelayMetrics::Connections do
     expect(ic.days).to eq(["Sat"])
   end
 
+  it "filters out excluded train_types case-insensitively" do
+    # Add a parquet that includes a train_type column so the filter matters.
+    typed = File.join(tmpdir, "typed.parquet")
+    DuckDB::Database.new.connect.execute(<<~SQL)
+      COPY (
+        SELECT * FROM (VALUES
+          ('FLX 1', 'FLX', '08000105', 1, TIMESTAMP '2025-01-09 11:00', NULL,                          'rf', FALSE),
+          ('FLX 1', 'FLX', '08000207', 3, NULL,                          TIMESTAMP '2025-01-09 12:00', 'rf', FALSE),
+          ('ICE 9', 'ICE', '08000105', 1, TIMESTAMP '2025-01-09 13:00', NULL,                          'ri', FALSE),
+          ('ICE 9', 'ICE', '08000207', 3, NULL,                          TIMESTAMP '2025-01-09 14:00', 'ri', FALSE)
+        ) AS t(train_name, train_type, eva, train_line_station_num, departure_planned_time, arrival_planned_time, train_line_ride_id, is_canceled)
+      ) TO '#{typed}' (FORMAT PARQUET);
+    SQL
+
+    rows = described_class.new(parquet_glob: typed).run(
+      from_eva: "08000105", to_eva: "08000207", years_back: 3,
+      exclude_types: %w[flx]
+    )
+    expect(rows.map(&:train_name)).to eq(["ICE 9"])
+  end
+
   it "returns empty when no connection exists" do
     rows = described_class.new(parquet_glob: glob).run(
       from_eva: "08000105", to_eva: "08000888", years_back: 3
@@ -73,5 +94,32 @@ RSpec.describe TrainDelayMetrics::Connections do
 
     train_names = rows.map(&:train_name)
     expect(train_names).to contain_exactly("ICE 100", "IC 200", "S 1")
+  end
+
+  it "unique_train_names returns a sorted, deduped list of train names" do
+    names = described_class.new(parquet_glob: glob).unique_train_names(
+      from_eva: %w[08000105 08098105],
+      to_eva:   %w[08000207 08098207]
+    )
+    expect(names).to eq(["IC 200", "ICE 100", "S 1"])
+  end
+
+  it "unique_train_names respects exclude_types" do
+    typed = File.join(tmpdir, "typed.parquet")
+    DuckDB::Database.new.connect.execute(<<~SQL)
+      COPY (
+        SELECT * FROM (VALUES
+          ('FLX 1', 'FLX', '08000105', 1, TIMESTAMP '2025-01-09 11:00', NULL,                          'rf', FALSE),
+          ('FLX 1', 'FLX', '08000207', 3, NULL,                          TIMESTAMP '2025-01-09 12:00', 'rf', FALSE),
+          ('ICE 9', 'ICE', '08000105', 1, TIMESTAMP '2025-01-09 13:00', NULL,                          'ri', FALSE),
+          ('ICE 9', 'ICE', '08000207', 3, NULL,                          TIMESTAMP '2025-01-09 14:00', 'ri', FALSE)
+        ) AS t(train_name, train_type, eva, train_line_station_num, departure_planned_time, arrival_planned_time, train_line_ride_id, is_canceled)
+      ) TO '#{typed}' (FORMAT PARQUET);
+    SQL
+
+    names = described_class.new(parquet_glob: typed).unique_train_names(
+      from_eva: "08000105", to_eva: "08000207", exclude_types: %w[flx]
+    )
+    expect(names).to eq(["ICE 9"])
   end
 end

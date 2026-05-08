@@ -70,6 +70,10 @@ bundle exec bin/train-connections --from 08000105,08098105 --to 08000207,0809820
 
 If `--years` is omitted, the full dataset is used. The first line of output shows the actual window (e.g. `Window: 2024-07-01 -> 2026-04-30 (full dataset)`).
 
+`--exclude-types LIST` drops rides whose `train_type` matches any of the listed values, case-insensitive (e.g. `--exclude-types FLX,DPF` to ignore FlixTrain and charter services).
+
+`--unique` prints just an alphabetically sorted, deduplicated list of train names that connect the two stations — no times, days, or counts. Useful when you only care which trains exist on the route.
+
 ```
 Train       Dep    Arr    Days                         Obs
 ----------------------------------------------------------
