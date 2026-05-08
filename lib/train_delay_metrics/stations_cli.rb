@@ -4,13 +4,14 @@ require_relative "stations"
 module TrainDelayMetrics
   class StationsCLI
     def self.run(argv, stdout: $stdout, stderr: $stderr)
-      options = { parquet_glob: Query::DEFAULT_GLOB }
+      options = { parquet_glob: Query::DEFAULT_GLOB, train_types: [] }
 
       parser = OptionParser.new do |o|
         o.banner = %{Usage: train-stations PATTERN [options]
 
   PATTERN is a SQL ILIKE pattern, e.g. "berlin sp%" or "%frankfurt%".
   If you pass a bare word, it is wrapped as %word%.}
+        o.on("--types LIST", Array, %q{Comma-separated train types to keep, e.g. "IC,ICE". Case-sensitive.}) { |v| options[:train_types] = v }
         o.on("--data GLOB", "Parquet glob (default #{Query::DEFAULT_GLOB})") { |v| options[:parquet_glob] = v }
         o.on("-h", "--help") { stdout.puts o; return 0 }
       end
@@ -29,7 +30,8 @@ module TrainDelayMetrics
         return 2
       end
 
-      rows = Stations.new(parquet_glob: options[:parquet_glob]).run(name_pattern: pattern)
+      rows = Stations.new(parquet_glob: options[:parquet_glob])
+                     .run(name_pattern: pattern, train_types: options[:train_types])
 
       if rows.empty?
         stdout.puts "No stations match #{pattern.inspect}."

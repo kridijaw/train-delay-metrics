@@ -44,6 +44,7 @@ Delay probability:               17.24%
 ```sh
 bundle exec bin/train-stations frankfurt
 bundle exec bin/train-stations "berlin sp%"
+bundle exec bin/train-stations frankfurt --types IC,ICE   # only EVAs with IC/ICE service
 ```
 
 ```

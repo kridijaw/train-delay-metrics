@@ -4,26 +4,33 @@ module TrainDelayMetrics
   class Stations
     Station = Struct.new(:station_name, :eva, :train_types, :rows, keyword_init: true)
 
-    SQL = <<~SQL.freeze
-      SELECT station_name,
-             eva,
-             list(DISTINCT train_type ORDER BY train_type) AS train_types,
-             COUNT(*) AS rows
-      FROM read_parquet(?)
-      WHERE station_name ILIKE ?
-      GROUP BY station_name, eva
-      ORDER BY station_name, rows DESC;
-    SQL
-
     def initialize(parquet_glob:, connection: nil)
       @parquet_glob = parquet_glob
       @connection   = connection
     end
 
-    def run(name_pattern:)
-      stmt = connection.prepared_statement(SQL)
-      stmt.bind(1, @parquet_glob)
-      stmt.bind(2, name_pattern)
+    def run(name_pattern:, train_types: nil)
+      types = Array(train_types).map { |t| t.to_s.strip }.reject(&:empty?)
+
+      sql = +<<~SQL
+        SELECT station_name,
+               eva,
+               list(DISTINCT train_type ORDER BY train_type) AS train_types,
+               COUNT(*) AS rows
+        FROM read_parquet(?)
+        WHERE station_name ILIKE ?
+      SQL
+      binds = [@parquet_glob, name_pattern]
+
+      unless types.empty?
+        sql << "  AND train_type IN (#{(['?'] * types.size).join(', ')})\n"
+        binds.concat(types)
+      end
+
+      sql << "GROUP BY station_name, eva\nORDER BY station_name, rows DESC;"
+
+      stmt = connection.prepared_statement(sql)
+      binds.each_with_index { |v, i| stmt.bind(i + 1, v) }
 
       stmt.execute.map do |row|
         Station.new(

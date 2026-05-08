@@ -40,6 +40,17 @@ RSpec.describe TrainDelayMetrics::Stations do
     expect(s_bahn.rows).to eq(2)
   end
 
+  it "filters to only the requested train types" do
+    rows = described_class.new(parquet_glob: glob).run(
+      name_pattern: "%berlin%", train_types: %w[ICE IC]
+    )
+
+    expect(rows.size).to eq(1)
+    expect(rows.first.eva).to eq("08011160")
+    expect(rows.first.train_types).to contain_exactly("IC", "ICE")
+    expect(rows.first.rows).to eq(2)
+  end
+
   it "returns empty for non-matching pattern" do
     rows = described_class.new(parquet_glob: glob).run(name_pattern: "%nowhere%")
     expect(rows).to be_empty
