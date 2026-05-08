@@ -42,6 +42,10 @@ module TrainDelayMetrics
         o.on("--data GLOB", "Parquet glob (default #{Query::DEFAULT_GLOB})") { |v| options[:parquet_glob] = v }
         o.on("-h", "--help") { stdout.puts o; return 0 }
       end
+      if argv.empty?
+        stdout.puts parser
+        return 0
+      end
       parser.parse!(argv)
 
       missing = %i[from_evas to_evas].select { |k| options[k].nil? || options[k].empty? }
