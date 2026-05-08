@@ -42,9 +42,13 @@ module TrainDelayMetrics
           if v == "all"
             options[:input_all] = true
           else
-            path = FileInput.resolve(v, prefix: "tbs_", extension: ".json")
+            # Tolerate a leading @ — --input always takes a filename, but
+            # users habitually type @<name> from the --train / --from / --to
+            # flags where the @ prefix is meaningful.
+            raw  = v.delete_prefix("@")
+            path = FileInput.resolve(raw, prefix: "tbs_", extension: ".json")
             unless path
-              stderr.puts "Input file not found: #{v} (also tried out/, tbs_<name>, tbs_<name>.json)"
+              stderr.puts "Input file not found: #{raw} (also tried out/, tbs_<name>, tbs_<name>.json)"
               return 1
             end
             options[:input_file] = path
