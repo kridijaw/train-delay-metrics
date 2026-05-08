@@ -121,13 +121,13 @@ module TrainDelayMetrics
       )
 
       if results.size == 1
-        print_single(stdout, results.first, peaks[results.first.train_name], options)
+        print_single(stdout, results.first, peaks[results.first.train_name], options, time_source: :departure)
       else
         with_data = results.reject { |r| r.total_trips.zero? && r.canceled_trips.zero? }
         if with_data.empty?
           stdout.puts %{No trips found for any of the requested trains at EVA #{options[:station_eva]} in the last #{options[:years_back]} year(s).}
         else
-          print_table(stdout, with_data, peaks, options)
+          print_table(stdout, with_data, peaks, options, time_source: :departure)
         end
       end
       0
@@ -162,8 +162,10 @@ module TrainDelayMetrics
         }
         if to_evas.any?
           run_args[:destination_evas] = to_evas
+          time_source = :arrival
         else
           run_args[:station_evas] = evas
+          time_source = :departure
         end
 
         results = query.run_many(**run_args)
@@ -172,13 +174,13 @@ module TrainDelayMetrics
         if with_data.empty?
           stdout.puts "  No trips found in the last #{options[:years_back]} year(s)."
         else
-          print_table(stdout, with_data, peaks, options, indent: "  ")
+          print_table(stdout, with_data, peaks, options, indent: "  ", time_source: time_source)
         end
       end
       0
     end
 
-    def self.print_single(stdout, r, peak, options)
+    def self.print_single(stdout, r, peak, options, time_source: :departure)
       if r.total_trips.zero? && r.canceled_trips.zero?
         stdout.puts %{No trips found for "#{r.train_name}" at EVA #{options[:station_eva]} in the last #{options[:years_back]} year(s).}
         return
@@ -193,25 +195,30 @@ module TrainDelayMetrics
       end
       doc = r.delay_or_cancel_percentage
       stdout.puts "Delay-or-cancel probability:     #{doc ? format('%.2f', doc) + '%' : '-'}"
+      kind = peak_time_label(time_source)
+      label = "Peak #{kind} window (±30m):"
+      label = label.ljust(33)
       if peak && peak.scheduled.positive?
-        stdout.puts format("Peak window (±30m):              %s (%.2f%%, %d of %d)",
-                           peak.center_hhmm, peak.percentage, peak.disrupted, peak.scheduled)
+        stdout.puts format("%s%s (%.2f%%, %d of %d)",
+                           label, peak.center_hhmm, peak.percentage, peak.disrupted, peak.scheduled)
       else
-        stdout.puts "Peak window (±30m):              -"
+        stdout.puts "#{label}-"
       end
     end
 
-    def self.print_table(stdout, results, peaks, options, indent: "")
+    def self.print_table(stdout, results, peaks, options, indent: "", time_source: :departure)
       name_w = [results.map { |r| r.train_name.to_s.length }.max, 5].max
-      stdout.puts indent + format("%-#{name_w}s  %7s  %7s  %7s  %7s  %7s  %10s",
+      peak_w = 12 # fits "Arr Peak D+C" / "Dep Peak D+C" exactly; cells right-align inside
+      peak_header = "#{peak_time_label(time_source).capitalize} Peak D+C"
+      stdout.puts indent + format("%-#{name_w}s  %7s  %7s  %7s  %7s  %7s  %#{peak_w}s",
                                   "Train", "Trips", "Cancel", "Delay#{options[:threshold_minutes]}+",
-                                  "Prob%", "Prob%+C", "Peak D+C")
-      stdout.puts indent + "-" * (name_w + 2 + 7 + 2 + 7 + 2 + 7 + 2 + 7 + 2 + 7 + 2 + 10)
+                                  "Prob%", "Prob%+C", peak_header)
+      stdout.puts indent + "-" * (name_w + 2 + 7 + 2 + 7 + 2 + 7 + 2 + 7 + 2 + 7 + 2 + peak_w)
       results.each do |r|
         prob   = r.delay_percentage           ? format("%.2f", r.delay_percentage)           : "-"
         prob_c = r.delay_or_cancel_percentage ? format("%.2f", r.delay_or_cancel_percentage) : "-"
         peak_s = format_peak_cell(peaks[r.train_name])
-        stdout.puts indent + format("%-#{name_w}s  %7d  %7d  %7d  %7s  %7s  %10s",
+        stdout.puts indent + format("%-#{name_w}s  %7d  %7d  %7d  %7s  %7s  %#{peak_w}s",
                                     r.train_name, r.total_trips, r.canceled_trips, r.delayed_trips,
                                     prob, prob_c, peak_s)
       end
@@ -222,6 +229,13 @@ module TrainDelayMetrics
     def self.format_peak_cell(peak)
       return "-" unless peak && peak.scheduled.positive?
       format("%s %3d%%", peak.center_hhmm, peak.percentage.round)
+    end
+
+    # "dep" for per-stop mode (time-of-day = departure_planned_time),
+    # "arr" for destination-dedup mode (time-of-day = arrival_planned_time
+    # at the destination EVA).
+    def self.peak_time_label(time_source)
+      time_source == :arrival ? "arr" : "dep"
     end
 
     # Group title for `train-delay --input`. Uses the new `from`/`to`/`stations`
