@@ -49,7 +49,16 @@ RSpec.describe TrainDelayMetrics::Query do
           ('ICE 802', '8000001', 99, (CURRENT_DATE - INTERVAL  10 DAY) + INTERVAL '09:14:00', FALSE, (CURRENT_DATE - INTERVAL  10 DAY) + INTERVAL '09:14:00'),
           ('ICE 802', '8000105', 99, NULL,                                                    FALSE, NULL),
           ('ICE 802', '8000105', 99, (CURRENT_DATE - INTERVAL  10 DAY) + INTERVAL '09:14:00', TRUE,  (CURRENT_DATE - INTERVAL  10 DAY) + INTERVAL '09:14:00'),
-          ('ICE 802', '8000105', 99, (CURRENT_DATE - INTERVAL 4 YEAR ) + INTERVAL '09:14:00', FALSE, (CURRENT_DATE - INTERVAL 4 YEAR ) + INTERVAL '09:14:00')
+          ('ICE 802', '8000105', 99, (CURRENT_DATE - INTERVAL 4 YEAR ) + INTERVAL '09:14:00', FALSE, (CURRENT_DATE - INTERVAL 4 YEAR ) + INTERVAL '09:14:00'),
+          -- ICE 444: tests destination_evas dedup. Two destination EVAs
+          -- (8000900, 8000901) on the same calendar day. Day 1: arrives
+          -- 8000900 first at 12:00 (delay 5 min, on time), then 8000901 at
+          -- 12:30 (delay 25 min, late). Day 2: only 8000900 (delay 30 min).
+          -- Per-stop count would be 3 trips / 2 delayed; dedup picks the
+          -- earlier arrival per day so it's 2 trips / 1 delayed.
+          ('ICE 444', '8000900',  5, (CURRENT_DATE - INTERVAL   1 DAY) + INTERVAL '12:00:00', FALSE, (CURRENT_DATE - INTERVAL   1 DAY) + INTERVAL '12:00:00'),
+          ('ICE 444', '8000901', 25, (CURRENT_DATE - INTERVAL   1 DAY) + INTERVAL '12:30:00', FALSE, (CURRENT_DATE - INTERVAL   1 DAY) + INTERVAL '12:30:00'),
+          ('ICE 444', '8000900', 30, (CURRENT_DATE - INTERVAL   2 DAY) + INTERVAL '12:00:00', FALSE, (CURRENT_DATE - INTERVAL   2 DAY) + INTERVAL '12:00:00')
         )
       ) TO '#{parquet}' (FORMAT PARQUET);
     SQL
@@ -119,6 +128,44 @@ RSpec.describe TrainDelayMetrics::Query do
       threshold_minutes: 20, years_back: 3
     )
     expect(peaks).to be_empty
+  end
+
+  it "destination_evas dedupes to one row per (train, day) using the earliest arrival" do
+    per_stop = described_class.new(parquet_glob: glob).run_many(
+      train_names: ["ICE 444"], station_evas: ["8000900", "8000901"],
+      threshold_minutes: 20, years_back: 3
+    ).first
+    deduped = described_class.new(parquet_glob: glob).run_many(
+      train_names: ["ICE 444"], destination_evas: ["8000900", "8000901"],
+      threshold_minutes: 20, years_back: 3
+    ).first
+
+    # Per-stop counts every matching row: 3 trips, 1 delayed at >=20 (the
+    # 25-min stop at 8000901; the 5-min and 30-min are at 8000900 — actually
+    # the 30-min is delayed too).
+    expect(per_stop.total_trips).to eq(3)
+    expect(per_stop.delayed_trips).to eq(2)
+
+    # Dedup picks the EARLIEST arrival per day at any destination EVA. Day 1
+    # picks 8000900@12:00 (5 min, on time). Day 2 has only 8000900 (30 min,
+    # delayed). So 2 trips, 1 delayed.
+    expect(deduped.total_trips).to eq(2)
+    expect(deduped.delayed_trips).to eq(1)
+    expect(deduped.delay_percentage).to be_within(0.001).of(50.0)
+  end
+
+  it "peak_windows in destination mode uses arrival_planned_time so terminus stops count" do
+    peaks = described_class.new(parquet_glob: glob).peak_windows(
+      train_names: ["ICE 444"], destination_evas: ["8000900", "8000901"],
+      threshold_minutes: 20, years_back: 3
+    )
+    peak = peaks["ICE 444"]
+    expect(peak).not_to be_nil
+    # Earliest-arrival dedup picks 12:00 on both days. Window centered there
+    # has 2 scheduled, 1 disrupted (the 30-min day-2 row).
+    expect(peak.center_hhmm).to eq("12:00")
+    expect(peak.scheduled).to eq(2)
+    expect(peak.disrupted).to eq(1)
   end
 
   it "run_many returns multiple trains sorted by delay probability descending" do

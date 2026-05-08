@@ -47,16 +47,36 @@ module TrainDelayMetrics
       results.first || Result.new(train_name: train_name.to_s, total_trips: 0, canceled_trips: 0, delayed_trips: 0, delay_percentage: nil)
     end
 
-    # Computes delay statistics for one or more trains across one or more
-    # stations. Pass either station_eva: (single) or station_evas: (list).
-    # Returns an array of Result, ordered by delay_percentage DESC (NULL last).
-    def run_many(train_names:, station_eva: nil, station_evas: nil, threshold_minutes:, years_back:)
+    # Computes delay statistics for one or more trains. Two modes:
+    #
+    # * Per-stop (default). Pass `station_eva:` or `station_evas:`. Every
+    #   matching stop-row counts as one "trip". A run that hits two queried
+    #   EVAs in the same day contributes two rows.
+    #
+    # * Destination-deduplicated. Pass `destination_evas:`. The query
+    #   restricts to those EVAs and keeps the first arrival per
+    #   (train_name, calendar day) so a single run counts as one trip even
+    #   if it stops at multiple destination EVAs on the same day. This is
+    #   what `train-delay --input` uses with the `to` array, modelling a
+    #   passenger journey ("did the train get me to my destination on
+    #   time?") instead of station throughput.
+    #
+    # Returns an array of Result, ordered by delay_percentage DESC (NULL
+    # last).
+    def run_many(train_names:, station_eva: nil, station_evas: nil, destination_evas: nil, threshold_minutes:, years_back:)
       names = Array(train_names).map(&:to_s).reject(&:empty?)
       raise ArgumentError, "train_names must not be empty" if names.empty?
 
-      evas = Array(station_evas).map(&:to_s).reject(&:empty?)
-      evas = [station_eva.to_s] if evas.empty? && station_eva
-      raise ArgumentError, "station_eva or station_evas must be provided" if evas.empty?
+      dest_evas = Array(destination_evas).map(&:to_s).reject(&:empty?)
+      if dest_evas.any?
+        evas = dest_evas
+        dedup_by_day = true
+      else
+        evas = Array(station_evas).map(&:to_s).reject(&:empty?)
+        evas = [station_eva.to_s] if evas.empty? && station_eva
+        dedup_by_day = false
+      end
+      raise ArgumentError, "station_eva, station_evas, or destination_evas must be provided" if evas.empty?
 
       train_placeholders = (["?"] * names.size).join(", ")
       eva_placeholders   = (["?"] * evas.size).join(", ")
@@ -65,7 +85,37 @@ module TrainDelayMetrics
       # delay_percentage = delayed_trips / total_trips means "given the train
       # ran, was it late?". canceled_trips is reported alongside as a separate
       # failure mode — it doesn't get folded into the percentage.
-      sql = <<~SQL
+      filter_cte = if dedup_by_day
+                     # Keep only the first arrival per (train, day) so a run
+                     # touching multiple destination EVAs is counted once.
+                     <<~SQL
+                       WITH base AS (
+                         SELECT train_name, eva, delay_in_min, is_canceled, arrival_planned_time
+                         FROM read_parquet(?)
+                         WHERE train_name IN (#{train_placeholders})
+                           AND eva IN (#{eva_placeholders})
+                           AND arrival_planned_time IS NOT NULL
+                           AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 YEAR) * ?
+                         QUALIFY ROW_NUMBER() OVER (
+                           PARTITION BY train_name, CAST(arrival_planned_time AS DATE)
+                           ORDER BY arrival_planned_time, eva
+                         ) = 1
+                       )
+                     SQL
+                   else
+                     <<~SQL
+                       WITH base AS (
+                         SELECT train_name, delay_in_min, is_canceled
+                         FROM read_parquet(?)
+                         WHERE train_name IN (#{train_placeholders})
+                           AND eva IN (#{eva_placeholders})
+                           AND arrival_planned_time IS NOT NULL
+                           AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 YEAR) * ?
+                       )
+                     SQL
+                   end
+
+      sql = filter_cte + <<~SQL
         SELECT train_name,
                COUNT(*) FILTER (WHERE is_canceled = FALSE)                              AS total_trips,
                COUNT(*) FILTER (WHERE is_canceled = TRUE)                               AS canceled_trips,
@@ -74,16 +124,12 @@ module TrainDelayMetrics
                     ELSE 100.0 * COUNT(*) FILTER (WHERE is_canceled = FALSE AND delay_in_min >= ?)
                                / COUNT(*) FILTER (WHERE is_canceled = FALSE)
                END                                                                      AS delay_percentage
-        FROM read_parquet(?)
-        WHERE train_name IN (#{train_placeholders})
-          AND eva IN (#{eva_placeholders})
-          AND arrival_planned_time IS NOT NULL
-          AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 YEAR) * ?
+        FROM base
         GROUP BY train_name
       SQL
 
       stmt = connection.prepared_statement(sql)
-      binds = [threshold_minutes, threshold_minutes, @parquet_glob, *names, *evas, years_back]
+      binds = [@parquet_glob, *names, *evas, years_back, threshold_minutes, threshold_minutes]
       binds.each_with_index { |v, i| stmt.bind(i + 1, v) }
 
       seen = {}
@@ -107,35 +153,86 @@ module TrainDelayMetrics
     end
 
     # Returns { train_name => PeakWindow }. For each train, the window is the
-    # ±30-minute span around an observed departure minute that contains the
-    # greatest number of disruption events. Trains with no data — or with no
-    # rows that have departure_planned_time at the queried EVA — are absent
-    # from the hash. Windows do not wrap across midnight (a 23:50 center sees
-    # 23:20–24:00 only); sample sizes there are tiny so this is rarely the
-    # peak window in practice.
-    def peak_windows(train_names:, station_eva: nil, station_evas: nil, threshold_minutes:, years_back:)
+    # ±30-minute span around an observed time-of-day minute that contains the
+    # greatest number of disruption events.
+    #
+    # In per-stop mode (no destination_evas), time-of-day is the row's
+    # `departure_planned_time` and only rows with one are considered (origin
+    # stops are excluded automatically; terminus stops have no departure and
+    # are also excluded).
+    #
+    # In destination-deduplicated mode (destination_evas given), time-of-day
+    # is the row's `arrival_planned_time` (so terminus stops still count) and
+    # the per-minute aggregation is taken over the deduplicated row set —
+    # one row per (train, calendar day) per the same QUALIFY rule used by
+    # run_many.
+    #
+    # Trains with no matching rows are absent from the hash. Windows do not
+    # wrap across midnight (a 23:50 center sees 23:20–24:00 only); sample
+    # sizes there are tiny so this is rarely the peak window in practice.
+    def peak_windows(train_names:, station_eva: nil, station_evas: nil, destination_evas: nil, threshold_minutes:, years_back:)
       names = Array(train_names).map(&:to_s).reject(&:empty?)
       raise ArgumentError, "train_names must not be empty" if names.empty?
 
-      evas = Array(station_evas).map(&:to_s).reject(&:empty?)
-      evas = [station_eva.to_s] if evas.empty? && station_eva
-      raise ArgumentError, "station_eva or station_evas must be provided" if evas.empty?
+      dest_evas = Array(destination_evas).map(&:to_s).reject(&:empty?)
+      if dest_evas.any?
+        evas = dest_evas
+        dedup_by_day = true
+      else
+        evas = Array(station_evas).map(&:to_s).reject(&:empty?)
+        evas = [station_eva.to_s] if evas.empty? && station_eva
+        dedup_by_day = false
+      end
+      raise ArgumentError, "station_eva, station_evas, or destination_evas must be provided" if evas.empty?
 
       train_placeholders = (["?"] * names.size).join(", ")
       eva_placeholders   = (["?"] * evas.size).join(", ")
 
-      sql = <<~SQL
-        WITH per_min AS (
+      base_cte = if dedup_by_day
+                   # Use arrival_planned_time so terminus stops are included,
+                   # and dedupe to one row per (train, day) so a run touching
+                   # multiple destination EVAs is counted once.
+                   <<~SQL
+                     WITH base AS (
+                       SELECT train_name,
+                              arrival_planned_time AS time_of_day_ts,
+                              delay_in_min,
+                              is_canceled
+                       FROM read_parquet(?)
+                       WHERE train_name IN (#{train_placeholders})
+                         AND eva IN (#{eva_placeholders})
+                         AND arrival_planned_time IS NOT NULL
+                         AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 YEAR) * ?
+                       QUALIFY ROW_NUMBER() OVER (
+                         PARTITION BY train_name, CAST(arrival_planned_time AS DATE)
+                         ORDER BY arrival_planned_time, eva
+                       ) = 1
+                     ),
+                   SQL
+                 else
+                   <<~SQL
+                     WITH base AS (
+                       SELECT train_name,
+                              departure_planned_time AS time_of_day_ts,
+                              delay_in_min,
+                              is_canceled
+                       FROM read_parquet(?)
+                       WHERE train_name IN (#{train_placeholders})
+                         AND eva IN (#{eva_placeholders})
+                         AND departure_planned_time IS NOT NULL
+                         AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 YEAR) * ?
+                     ),
+                   SQL
+                 end
+
+      sql = base_cte + <<~SQL
+        per_min AS (
           SELECT train_name,
-                 (EXTRACT(HOUR FROM departure_planned_time) * 60
-                  + EXTRACT(MINUTE FROM departure_planned_time))::INTEGER AS dep_min,
+                 (EXTRACT(HOUR FROM time_of_day_ts) * 60
+                  + EXTRACT(MINUTE FROM time_of_day_ts))::INTEGER AS dep_min,
                  COUNT(*)                                                                  AS scheduled,
                  COUNT(*) FILTER (WHERE is_canceled OR delay_in_min >= ?)                  AS disrupted
-          FROM read_parquet(?)
-          WHERE train_name IN (#{train_placeholders})
-            AND eva IN (#{eva_placeholders})
-            AND departure_planned_time IS NOT NULL
-            AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 YEAR) * ?
+          FROM base
           GROUP BY train_name, dep_min
         ),
         windowed AS (
@@ -166,7 +263,7 @@ module TrainDelayMetrics
       SQL
 
       stmt = connection.prepared_statement(sql)
-      binds = [threshold_minutes, @parquet_glob, *names, *evas, years_back]
+      binds = [@parquet_glob, *names, *evas, years_back, threshold_minutes]
       binds.each_with_index { |v, i| stmt.bind(i + 1, v) }
 
       out = {}

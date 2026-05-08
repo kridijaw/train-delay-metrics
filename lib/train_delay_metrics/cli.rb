@@ -151,18 +151,23 @@ module TrainDelayMetrics
         stdout.puts if i > 0
         stdout.puts "Group #{i + 1}: #{format_group_title(g, evas)}"
 
-        results = query.run_many(
+        # If the group declares a `to` array (newer JSON format), measure
+        # delay at the destination and de-dup to one row per (train, day).
+        # Otherwise fall back to per-stop counting against the union of EVAs.
+        to_evas = Array(g["to"]).map(&:to_s).reject(&:empty?)
+        run_args = {
           train_names:       trains,
-          station_evas:      evas,
           threshold_minutes: options[:threshold_minutes],
           years_back:        options[:years_back]
-        )
-        peaks = query.peak_windows(
-          train_names:       trains,
-          station_evas:      evas,
-          threshold_minutes: options[:threshold_minutes],
-          years_back:        options[:years_back]
-        )
+        }
+        if to_evas.any?
+          run_args[:destination_evas] = to_evas
+        else
+          run_args[:station_evas] = evas
+        end
+
+        results = query.run_many(**run_args)
+        peaks   = query.peak_windows(**run_args)
         with_data = results.reject { |r| r.total_trips.zero? && r.canceled_trips.zero? }
         if with_data.empty?
           stdout.puts "  No trips found in the last #{options[:years_back]} year(s)."
