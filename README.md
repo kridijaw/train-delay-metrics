@@ -97,7 +97,10 @@ bundle exec bin/find-train-stations --input cities.txt --types ICE --out
 ```sh
 bundle exec bin/trains-by-station --from 08000105,08098105 --to 08000207,08098207
 bundle exec bin/trains-by-station --from 08000105,08098105 --to 08000207,08098207 --exclude-types FLX
+bundle exec bin/trains-by-station --from 08000105 --to 08000207 --months 6   # lookback window
 ```
+
+The lookback window is set with either `--years N` or `--months N` (mutually exclusive). Without either, the full dataset is used; the first line of output prints the window and the flag form (e.g. `Window: 2025-11-09 -> 2026-05-09 (--months 6)`).
 
 `--from` / `--to` accept either a comma-separated EVA list or `@FILE` to read newline-separated EVAs from a file. Inside `@FILE`, bare names are resolved literally first, then against `out/`, then with the `station_` prefix and `.txt` extension applied — so `--from @berlin` resolves to `out/station_berlin.txt`. Umlauts are transliterated on the way in (`ü→ue`, `ö→oe`, `ä→ae`, `ß→ss`), so `--from @düsseldorf` resolves to `out/station_duesseldorf.txt`. `--to @frankfurt-evas.txt` still consumes a list produced by `find-train-stations --out`.
 
@@ -167,7 +170,8 @@ EVA       Side     Station               Trains
 | `--train`             | `"ICE 821"`     | Exact `train_name` as it appears in the dataset (with prefix)|
 | `--station`           | `08000105`      | EVA station number, **zero-padded to 8 digits, as a string** |
 | `--threshold-minutes` | `20`            | Minimum delay (inclusive) to count                           |
-| `--years`             | `3`             | Lookback window from today                                   |
+| `--years`             | `3`             | Lookback window from today, in years (mutually exclusive with `--months`) |
+| `--months`            | `6`             | Lookback window from today, in months (mutually exclusive with `--years`) |
 | `--data`              | `path/*.parquet`| Override the Parquet glob                                    |
 
 Find a station's EVA via DuckDB:

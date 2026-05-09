@@ -80,7 +80,7 @@ RSpec.describe TrainDelayMetrics::Query do
   it "counts trips and delayed trips correctly" do
     result = described_class.new(parquet_glob: glob).run(
       train_name: "ICE 802", station_eva: "8000105",
-      threshold_minutes: 20, years_back: 3
+      threshold_minutes: 20, months_back: 36
     )
 
     expect(result.total_trips).to eq(5)
@@ -94,7 +94,7 @@ RSpec.describe TrainDelayMetrics::Query do
   it "returns zero counts and nil percentage when no rows match" do
     result = described_class.new(parquet_glob: glob).run(
       train_name: "ICE 0000", station_eva: "8000105",
-      threshold_minutes: 20, years_back: 3
+      threshold_minutes: 20, months_back: 36
     )
 
     expect(result.total_trips).to eq(0)
@@ -107,7 +107,7 @@ RSpec.describe TrainDelayMetrics::Query do
   it "reports canceled-only trains with total_trips=0 and a non-nil canceled_trips" do
     result = described_class.new(parquet_glob: glob).run(
       train_name: "ICE 333", station_eva: "8000105",
-      threshold_minutes: 20, years_back: 3
+      threshold_minutes: 20, months_back: 36
     )
 
     expect(result.total_trips).to eq(0)
@@ -121,7 +121,7 @@ RSpec.describe TrainDelayMetrics::Query do
   it "peak_windows finds the (weekday, ±30 min) bucket with the most disruptions" do
     peaks = described_class.new(parquet_glob: glob).peak_windows(
       train_names: ["ICE 777"], station_eva: "8000105",
-      threshold_minutes: 20, years_back: 3
+      threshold_minutes: 20, months_back: 36
     )
 
     peak = peaks["ICE 777"]
@@ -140,7 +140,7 @@ RSpec.describe TrainDelayMetrics::Query do
   it "peak_windows omits trains with no rows that have departure_planned_time" do
     peaks = described_class.new(parquet_glob: glob).peak_windows(
       train_names: ["ICE 0000"], station_eva: "8000105",
-      threshold_minutes: 20, years_back: 3
+      threshold_minutes: 20, months_back: 36
     )
     expect(peaks).to be_empty
   end
@@ -148,11 +148,11 @@ RSpec.describe TrainDelayMetrics::Query do
   it "destination_evas dedupes to one row per (train, day) using the latest arrival" do
     per_stop = described_class.new(parquet_glob: glob).run_many(
       train_names: ["ICE 444"], station_evas: ["8000900", "8000901"],
-      threshold_minutes: 20, years_back: 3
+      threshold_minutes: 20, months_back: 36
     ).first
     deduped = described_class.new(parquet_glob: glob).run_many(
       train_names: ["ICE 444"], destination_evas: ["8000900", "8000901"],
-      threshold_minutes: 20, years_back: 3
+      threshold_minutes: 20, months_back: 36
     ).first
 
     # Per-stop counts every matching row: 3 trips, 2 delayed at >=20 (the
@@ -172,7 +172,7 @@ RSpec.describe TrainDelayMetrics::Query do
   it "peak_windows in destination mode uses arrival_planned_time so terminus stops count" do
     peaks = described_class.new(parquet_glob: glob).peak_windows(
       train_names: ["ICE 444"], destination_evas: ["8000900", "8000901"],
-      threshold_minutes: 20, years_back: 3
+      threshold_minutes: 20, months_back: 36
     )
     peak = peaks["ICE 444"]
     expect(peak).not_to be_nil
@@ -191,7 +191,7 @@ RSpec.describe TrainDelayMetrics::Query do
       train_names: ["ICE 444"],
       destination_evas: ["8000900", "8000901"],
       origin_evas:      ["8000800"],
-      threshold_minutes: 20, years_back: 3
+      threshold_minutes: 20, months_back: 36
     )
     peak = peaks["ICE 444"]
     expect(peak).not_to be_nil
@@ -208,7 +208,7 @@ RSpec.describe TrainDelayMetrics::Query do
     results = described_class.new(parquet_glob: glob).run_many(
       train_names: ["ICE 802", "ICE 999", "ICE 555", "ICE 0000"],
       station_eva: "8000105",
-      threshold_minutes: 20, years_back: 3
+      threshold_minutes: 20, months_back: 36
     )
 
     expect(results.map(&:train_name)).to eq(["ICE 999", "ICE 802", "ICE 555", "ICE 0000"])

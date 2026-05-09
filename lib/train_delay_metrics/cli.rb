@@ -7,11 +7,13 @@ module TrainDelayMetrics
     def self.run(argv, stdout: $stdout, stderr: $stderr)
       options = {
         threshold_minutes: 20,
-        years_back:        3,
+        months_back:       36,           # default: 3 years
+        window_label:      "3 years",
         parquet_glob:      Query::DEFAULT_GLOB,
         train_names:       [],
         input_file:        nil
       }
+      window_flag = nil # track whether --years or --months was passed
 
       parser = OptionParser.new do |o|
         o.banner = %q{Usage: train-delay --train NAME[,NAME...] --station EVA [options]
@@ -55,7 +57,24 @@ module TrainDelayMetrics
           end
         end
         o.on("--threshold-minutes N", Integer, "Delay threshold in minutes (default 20)") { |v| options[:threshold_minutes] = v }
-        o.on("--years N", Integer, "Years of history to consider (default 3)") { |v| options[:years_back] = v }
+        o.on("--years N", Integer, "Years of history to consider (default 3). Mutually exclusive with --months.") do |v|
+          if window_flag == :months
+            stderr.puts "--years and --months cannot be combined."
+            return 1
+          end
+          window_flag = :years
+          options[:months_back]  = v * 12
+          options[:window_label] = "#{v} year#{'s' unless v == 1}"
+        end
+        o.on("--months N", Integer, "Months of history to consider. Mutually exclusive with --years.") do |v|
+          if window_flag == :years
+            stderr.puts "--years and --months cannot be combined."
+            return 1
+          end
+          window_flag = :months
+          options[:months_back]  = v
+          options[:window_label] = "#{v} month#{'s' unless v == 1}"
+        end
         o.on("--data GLOB", "Parquet glob (default #{Query::DEFAULT_GLOB})") { |v| options[:parquet_glob] = v }
         o.on("-h", "--help") { stdout.puts o; return 0 }
       end
@@ -111,13 +130,13 @@ module TrainDelayMetrics
         train_names:       options[:train_names],
         station_eva:       options[:station_eva],
         threshold_minutes: options[:threshold_minutes],
-        years_back:        options[:years_back]
+        months_back:       options[:months_back]
       )
       peaks = query.peak_windows(
         train_names:       options[:train_names],
         station_eva:       options[:station_eva],
         threshold_minutes: options[:threshold_minutes],
-        years_back:        options[:years_back]
+        months_back:       options[:months_back]
       )
 
       if results.size == 1
@@ -125,7 +144,7 @@ module TrainDelayMetrics
       else
         with_data = results.reject { |r| r.total_trips.zero? && r.canceled_trips.zero? }
         if with_data.empty?
-          stdout.puts %{No trips found for any of the requested trains at EVA #{options[:station_eva]} in the last #{options[:years_back]} year(s).}
+          stdout.puts %{No trips found for any of the requested trains at EVA #{options[:station_eva]} in the last #{options[:window_label]}.}
         else
           print_table(stdout, with_data, peaks, options, time_source: :departure)
         end
@@ -162,7 +181,7 @@ module TrainDelayMetrics
         common = {
           train_names:       trains,
           threshold_minutes: options[:threshold_minutes],
-          years_back:        options[:years_back]
+          months_back:       options[:months_back]
         }
         if to_evas.any?
           run_args  = common.merge(destination_evas: to_evas)
@@ -183,7 +202,7 @@ module TrainDelayMetrics
         peaks   = query.peak_windows(**peak_args)
         with_data = results.reject { |r| r.total_trips.zero? && r.canceled_trips.zero? }
         if with_data.empty?
-          stdout.puts "  No trips found in the last #{options[:years_back]} year(s)."
+          stdout.puts "  No trips found in the last #{options[:window_label]}."
         else
           print_table(stdout, with_data, peaks, options, indent: "  ", time_source: time_source)
         end
@@ -193,7 +212,7 @@ module TrainDelayMetrics
 
     def self.print_single(stdout, r, peak, options, time_source: :departure)
       if r.total_trips.zero? && r.canceled_trips.zero?
-        stdout.puts %{No trips found for "#{r.train_name}" at EVA #{options[:station_eva]} in the last #{options[:years_back]} year(s).}
+        stdout.puts %{No trips found for "#{r.train_name}" at EVA #{options[:station_eva]} in the last #{options[:window_label]}.}
         return
       end
       stdout.puts "Total trips:                     #{r.total_trips}"

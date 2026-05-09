@@ -11,7 +11,9 @@ module TrainDelayMetrics
 
     def self.run(argv, stdout: $stdout, stderr: $stderr)
       options = {
-        years_back:     nil,
+        months_back:    nil,
+        window_label:   nil, # "<N> year(s)" / "<N> month(s)" — nil means "full dataset"
+        window_flag:    nil, # "--years <N>" / "--months <N>" — for the Window: line
         exclude_types:  [],
         group_by_stops: false,
         out:            nil,
@@ -54,7 +56,24 @@ module TrainDelayMetrics
           end
           options[:input_file] = path
         end
-        o.on("--years N", Integer, "Years of history (default: all available data)") { |v| options[:years_back] = v }
+        o.on("--years N", Integer, "Years of history (default: all available data). Mutually exclusive with --months.") do |v|
+          if options[:window_flag] && !options[:window_flag].start_with?("--years")
+            stderr.puts "--years and --months cannot be combined."
+            return 1
+          end
+          options[:months_back]  = v * 12
+          options[:window_label] = "#{v} year#{'s' unless v == 1}"
+          options[:window_flag]  = "--years #{v}"
+        end
+        o.on("--months N", Integer, "Months of history (default: all available data). Mutually exclusive with --years.") do |v|
+          if options[:window_flag] && !options[:window_flag].start_with?("--months")
+            stderr.puts "--years and --months cannot be combined."
+            return 1
+          end
+          options[:months_back]  = v
+          options[:window_label] = "#{v} month#{'s' unless v == 1}"
+          options[:window_flag]  = "--months #{v}"
+        end
         o.on("--exclude-types LIST", Array, %q{Exclude train_types (case-insensitive), e.g. --exclude-types FLX,DPF}) { |v| options[:exclude_types] = v }
         o.on("--group-by-stops", "Group trains by the exact set of from/to EVAs they touch instead of listing per EVA") { options[:group_by_stops] = true }
         o.on("--out [FILE]", "Also write the EVAs↔trains mapping to FILE as JSON. Without a value, derives FILE as <from>-to-<to>.json. Bare filenames are saved under #{OUT_DIR}/. Consumable by `train-delay --input`.") { |v| options[:out] = v || :auto }
@@ -93,13 +112,14 @@ module TrainDelayMetrics
       svc = Connections.new(parquet_glob: options[:parquet_glob])
 
       window_from, window_to =
-        if options[:years_back]
-          [(Date.today << (options[:years_back] * 12)).to_s, Date.today.to_s]
+        if options[:months_back]
+          [(Date.today << options[:months_back]).to_s, Date.today.to_s]
         else
           min_d, max_d = svc.data_date_range
           [min_d&.to_s || "(none)", max_d&.to_s || "(none)"]
         end
-      window_line = "Window: #{window_from} -> #{window_to}#{options[:years_back] ? " (--years #{options[:years_back]})" : " (full dataset)"}"
+      window_suffix = options[:window_flag] ? " (#{options[:window_flag]})" : " (full dataset)"
+      window_line   = "Window: #{window_from} -> #{window_to}#{window_suffix}"
 
       pairs =
         if options[:input_file]
@@ -194,7 +214,7 @@ module TrainDelayMetrics
       rows = svc.trains_by_station(
         from_eva:      options[:from_evas],
         to_eva:        options[:to_evas],
-        years_back:    options[:years_back],
+        months_back:   options[:months_back],
         exclude_types: options[:exclude_types]
       )
 
@@ -264,7 +284,7 @@ module TrainDelayMetrics
       coverage = svc.train_coverage(
         from_eva:      options[:from_evas],
         to_eva:        options[:to_evas],
-        years_back:    options[:years_back],
+        months_back:   options[:months_back],
         exclude_types: options[:exclude_types]
       )
       if coverage.empty?
@@ -275,7 +295,7 @@ module TrainDelayMetrics
       station_rows = svc.trains_by_station(
         from_eva:      options[:from_evas],
         to_eva:        options[:to_evas],
-        years_back:    options[:years_back],
+        months_back:   options[:months_back],
         exclude_types: options[:exclude_types]
       )
       eva_to_name = station_rows.each_with_object({}) { |r, h| h[r.eva] = r.station_name }

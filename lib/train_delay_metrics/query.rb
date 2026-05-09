@@ -50,12 +50,12 @@ module TrainDelayMetrics
       @connection = connection
     end
 
-    def run(train_name:, station_eva:, threshold_minutes:, years_back:)
+    def run(train_name:, station_eva:, threshold_minutes:, months_back:)
       results = run_many(
         train_names:       [train_name],
         station_evas:      [station_eva],
         threshold_minutes: threshold_minutes,
-        years_back:        years_back
+        months_back:        months_back
       )
       results.first || Result.new(train_name: train_name.to_s, total_trips: 0, canceled_trips: 0, delayed_trips: 0, delay_percentage: nil)
     end
@@ -78,7 +78,7 @@ module TrainDelayMetrics
     #
     # Returns an array of Result, ordered by delay_percentage DESC (NULL
     # last).
-    def run_many(train_names:, station_eva: nil, station_evas: nil, destination_evas: nil, threshold_minutes:, years_back:)
+    def run_many(train_names:, station_eva: nil, station_evas: nil, destination_evas: nil, threshold_minutes:, months_back:)
       names = Array(train_names).map(&:to_s).reject(&:empty?)
       raise ArgumentError, "train_names must not be empty" if names.empty?
 
@@ -111,7 +111,7 @@ module TrainDelayMetrics
                          WHERE train_name IN (#{train_placeholders})
                            AND eva IN (#{eva_placeholders})
                            AND arrival_planned_time IS NOT NULL
-                           AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 YEAR) * ?
+                           AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 MONTH) * ?
                          QUALIFY ROW_NUMBER() OVER (
                            PARTITION BY train_name, CAST(arrival_planned_time AS DATE)
                            ORDER BY arrival_planned_time DESC, eva DESC
@@ -126,7 +126,7 @@ module TrainDelayMetrics
                          WHERE train_name IN (#{train_placeholders})
                            AND eva IN (#{eva_placeholders})
                            AND arrival_planned_time IS NOT NULL
-                           AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 YEAR) * ?
+                           AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 MONTH) * ?
                        )
                      SQL
                    end
@@ -145,7 +145,7 @@ module TrainDelayMetrics
       SQL
 
       stmt = connection.prepared_statement(sql)
-      binds = [@parquet_glob, *names, *evas, years_back, threshold_minutes, threshold_minutes]
+      binds = [@parquet_glob, *names, *evas, months_back, threshold_minutes, threshold_minutes]
       binds.each_with_index { |v, i| stmt.bind(i + 1, v) }
 
       seen = {}
@@ -196,7 +196,7 @@ module TrainDelayMetrics
     # Trains with no matching rows are absent from the hash. Windows do not
     # wrap across midnight (a 23:50 center sees 23:20–24:00 only); sample
     # sizes there are tiny so this is rarely the peak window in practice.
-    def peak_windows(train_names:, station_eva: nil, station_evas: nil, destination_evas: nil, origin_evas: nil, threshold_minutes:, years_back:)
+    def peak_windows(train_names:, station_eva: nil, station_evas: nil, destination_evas: nil, origin_evas: nil, threshold_minutes:, months_back:)
       names = Array(train_names).map(&:to_s).reject(&:empty?)
       raise ArgumentError, "train_names must not be empty" if names.empty?
 
@@ -221,11 +221,11 @@ module TrainDelayMetrics
 
       base_cte, base_binds = case mode
                              when :origin_dep
-                               build_origin_dep_base_cte(train_placeholders, names, dest_evas, origin_list, years_back)
+                               build_origin_dep_base_cte(train_placeholders, names, dest_evas, origin_list, months_back)
                              when :dest_arr
-                               build_dest_arr_base_cte(train_placeholders, names, dest_evas, years_back)
+                               build_dest_arr_base_cte(train_placeholders, names, dest_evas, months_back)
                              else
-                               build_per_stop_base_cte(train_placeholders, names, evas, years_back)
+                               build_per_stop_base_cte(train_placeholders, names, evas, months_back)
                              end
 
       sql = base_cte + <<~SQL
@@ -294,7 +294,7 @@ module TrainDelayMetrics
       @connection ||= DuckDB::Database.new.connect
     end
 
-    def build_per_stop_base_cte(train_placeholders, names, evas, years_back)
+    def build_per_stop_base_cte(train_placeholders, names, evas, months_back)
       eva_placeholders = (["?"] * evas.size).join(", ")
       cte = <<~SQL
         WITH base AS (
@@ -306,13 +306,13 @@ module TrainDelayMetrics
           WHERE train_name IN (#{train_placeholders})
             AND eva IN (#{eva_placeholders})
             AND departure_planned_time IS NOT NULL
-            AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 YEAR) * ?
+            AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 MONTH) * ?
         ),
       SQL
-      [cte, [@parquet_glob, *names, *evas, years_back]]
+      [cte, [@parquet_glob, *names, *evas, months_back]]
     end
 
-    def build_dest_arr_base_cte(train_placeholders, names, dest_evas, years_back)
+    def build_dest_arr_base_cte(train_placeholders, names, dest_evas, months_back)
       eva_placeholders = (["?"] * dest_evas.size).join(", ")
       cte = <<~SQL
         WITH base AS (
@@ -324,14 +324,14 @@ module TrainDelayMetrics
           WHERE train_name IN (#{train_placeholders})
             AND eva IN (#{eva_placeholders})
             AND arrival_planned_time IS NOT NULL
-            AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 YEAR) * ?
+            AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 MONTH) * ?
           QUALIFY ROW_NUMBER() OVER (
             PARTITION BY train_name, CAST(arrival_planned_time AS DATE)
             ORDER BY arrival_planned_time DESC, eva DESC
           ) = 1
         ),
       SQL
-      [cte, [@parquet_glob, *names, *dest_evas, years_back]]
+      [cte, [@parquet_glob, *names, *dest_evas, months_back]]
     end
 
     # Trip identity + disruption flag from destination (latest arrival per
@@ -339,7 +339,7 @@ module TrainDelayMetrics
     # at any from-EVA), joined on (train_name, calendar day). Days where
     # origin or destination row is missing in the data are dropped from the
     # peak aggregate.
-    def build_origin_dep_base_cte(train_placeholders, names, dest_evas, origin_evas, years_back)
+    def build_origin_dep_base_cte(train_placeholders, names, dest_evas, origin_evas, months_back)
       dest_eva_placeholders   = (["?"] * dest_evas.size).join(", ")
       origin_eva_placeholders = (["?"] * origin_evas.size).join(", ")
       cte = <<~SQL
@@ -352,7 +352,7 @@ module TrainDelayMetrics
           WHERE train_name IN (#{train_placeholders})
             AND eva IN (#{dest_eva_placeholders})
             AND arrival_planned_time IS NOT NULL
-            AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 YEAR) * ?
+            AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 MONTH) * ?
           QUALIFY ROW_NUMBER() OVER (
             PARTITION BY train_name, CAST(arrival_planned_time AS DATE)
             ORDER BY arrival_planned_time DESC, eva DESC
@@ -366,7 +366,7 @@ module TrainDelayMetrics
           WHERE train_name IN (#{train_placeholders})
             AND eva IN (#{origin_eva_placeholders})
             AND departure_planned_time IS NOT NULL
-            AND departure_planned_time >= CURRENT_DATE - (INTERVAL 1 YEAR) * ?
+            AND departure_planned_time >= CURRENT_DATE - (INTERVAL 1 MONTH) * ?
           QUALIFY ROW_NUMBER() OVER (
             PARTITION BY train_name, CAST(departure_planned_time AS DATE)
             ORDER BY departure_planned_time DESC, eva DESC
@@ -383,7 +383,7 @@ module TrainDelayMetrics
            AND d.day        = o.day
         ),
       SQL
-      [cte, [@parquet_glob, *names, *dest_evas, years_back, @parquet_glob, *names, *origin_evas, years_back]]
+      [cte, [@parquet_glob, *names, *dest_evas, months_back, @parquet_glob, *names, *origin_evas, months_back]]
     end
   end
 end

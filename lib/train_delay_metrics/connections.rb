@@ -18,8 +18,8 @@ module TrainDelayMetrics
     # For each EVA in the union of from_eva/to_eva, returns the list of
     # train_names (alphabetically sorted) that touch that EVA *and* connect
     # any from-EVA to any to-EVA in the configured window.
-    def trains_by_station(from_eva:, to_eva:, years_back: nil, exclude_types: nil)
-      sql, binds = build_sql(from_eva: from_eva, to_eva: to_eva, years_back: years_back, exclude_types: exclude_types, select: :by_station)
+    def trains_by_station(from_eva:, to_eva:, months_back: nil, exclude_types: nil)
+      sql, binds = build_sql(from_eva: from_eva, to_eva: to_eva, months_back: months_back, exclude_types: exclude_types, select: :by_station)
       stmt = bind(connection.prepared_statement(sql), binds)
       stmt.execute.map do |row|
         sorted = (row[2] || []).sort_by { |n| TrainName.sort_key(n) }
@@ -32,8 +32,8 @@ module TrainDelayMetrics
     # For each connecting train_name, returns the sorted list of from/to EVAs
     # it ever stops at across the window. Useful for bucketing trains by which
     # combination of stops they cover.
-    def train_coverage(from_eva:, to_eva:, years_back: nil, exclude_types: nil)
-      sql, binds = build_sql(from_eva: from_eva, to_eva: to_eva, years_back: years_back, exclude_types: exclude_types, select: :coverage)
+    def train_coverage(from_eva:, to_eva:, months_back: nil, exclude_types: nil)
+      sql, binds = build_sql(from_eva: from_eva, to_eva: to_eva, months_back: months_back, exclude_types: exclude_types, select: :coverage)
       stmt = bind(connection.prepared_statement(sql), binds)
       stmt.execute.map do |row|
         TrainCoverage.new(train_name: row[0], evas: row[1] || [])
@@ -55,7 +55,7 @@ module TrainDelayMetrics
 
     private
 
-    def build_sql(from_eva:, to_eva:, years_back:, exclude_types:, select:)
+    def build_sql(from_eva:, to_eva:, months_back:, exclude_types:, select:)
       from_evas = Array(from_eva).map(&:to_s).reject(&:empty?)
       to_evas   = Array(to_eva).map(&:to_s).reject(&:empty?)
       excluded  = Array(exclude_types).map { |t| t.to_s.strip }.reject(&:empty?).map(&:upcase)
@@ -68,7 +68,7 @@ module TrainDelayMetrics
       all_placeholders  = (["?"] * all_evas.size).join(", ")
       excl_placeholders = (["?"] * excluded.size).join(", ")
 
-      year_filter    = years_back ? "AND COALESCE(departure_planned_time, arrival_planned_time) >= CURRENT_DATE - (INTERVAL 1 YEAR) * ?" : ""
+      window_filter  = months_back ? "AND COALESCE(departure_planned_time, arrival_planned_time) >= CURRENT_DATE - (INTERVAL 1 MONTH) * ?" : ""
       exclude_filter = excluded.empty? ? "" : "AND (train_type IS NULL OR UPPER(train_type) NOT IN (#{excl_placeholders}))"
 
       outer = case select
@@ -130,7 +130,7 @@ module TrainDelayMetrics
             any_value(arrival_planned_time)   AS arr
           FROM read_parquet(?)
           WHERE eva IN (#{all_placeholders})
-            #{year_filter}
+            #{window_filter}
             #{exclude_filter}
           GROUP BY train_line_ride_id, eva, plan_date
         )
@@ -138,7 +138,7 @@ module TrainDelayMetrics
       SQL
 
       binds = [@parquet_glob, *all_evas]
-      binds << years_back if years_back
+      binds << months_back if months_back
       binds.concat(excluded)
       binds.concat([*from_evas, *to_evas])
       [sql, binds]
