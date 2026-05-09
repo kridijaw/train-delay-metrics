@@ -58,12 +58,7 @@ With multiple `--train` values the output switches to a compact table sorted by 
 
 `--input FILE` replaces both `--train` and `--station`: it reads a JSON file written by `trains-by-station --out` and runs the delay query once per group. When a group has a `to` array (the default for any JSON written by current `trains-by-station --out`), the query measures delay **at the destination** and de-dupes to one row per `(train, calendar day)` — keeping the train's *latest* arrival among the destination EVAs that day. So a service that stops at both Köln Messe/Deutz and Köln Hbf on the same run is scored at Köln Hbf (the final stop), modelling a passenger journey rather than station throughput. Older JSON files without a `to` array fall back to per-stop counting against the union of EVAs. Bare names are resolved literally first, then against `out/`, then with the `tbs_` prefix and `.json` extension applied — so `--input berlin_to_regensburg` resolves to `out/tbs_berlin_to_regensburg.json`. Umlauts are transliterated on the way in (`ü→ue`, `ö→oe`, `ä→ae`, `ß→ss`), so `--input düsseldorf_to_berlin` resolves to `out/tbs_duesseldorf_to_berlin.json`. Pass `--input all` to iterate every `out/tbs_*.json` file (the auto-derived names from `trains-by-station --out`), printing a header per file.
 
-`--train` also accepts `@FILE` to read newline-separated train names from a file — for example a list produced by `bin/get-trains --out`. Bare filenames are resolved against the current directory first, then against `out/`, so a file written by `get-trains` round-trips without retyping the path:
-
-```sh
-bundle exec bin/get-trains --from 08000105 --to 08000207 --out trains.txt   # writes out/trains.txt
-bundle exec bin/train-delay --train @trains.txt --station 08000207 --threshold-minutes 20
-```
+`--train` also accepts `@FILE` to read newline-separated train names from a file. Bare filenames are resolved against the current directory first, then against `out/`.
 
 ### Look up a station's EVA(s) and train types
 
@@ -96,41 +91,6 @@ Frankfurt (Main) Hbf     08098105      210  S
 bundle exec bin/find-train-stations --input cities.txt --types ICE --out
 # → out/station_berlin.txt, out/station_regensburg.txt, out/station_koeln.txt
 ```
-
-### Connections between two stations
-
-```sh
-bundle exec bin/train-connections --from 08000105 --to 08000207
-# With explicit window:
-bundle exec bin/train-connections --from 08000105 --to 08000207 --years 3
-# Multiple EVAs (long-distance + S-Bahn platform groups, both ends):
-bundle exec bin/train-connections --from 08000105,08098105 --to 08000207,08098207
-```
-
-If `--years` is omitted, the full dataset is used. The first line of output shows the actual window (e.g. `Window: 2024-07-01 -> 2026-04-30 (full dataset)`).
-
-`--exclude-types LIST` drops rides whose `train_type` matches any of the listed values, case-insensitive (e.g. `--exclude-types FLX,DPF` to ignore FlixTrain and charter services).
-
-```
-Train       Dep    Arr    Days                         Obs
-----------------------------------------------------------
-ICE 222     04:31  06:38  Mon Tue Wed Thu Fri          5
-NJ          03:13  05:57  Mon Tue Wed Thu Fri Sat Sun  211
-ICE 824     07:09  09:43  Wed Sat                      2
-...
-```
-
-Each row is a unique `(train_name, planned departure, planned arrival)` triple. `Days` lists the weekdays it was observed running; `Obs` counts observed runs in the window. Real-world planned-time edits across months can produce multiple rows for what is logically the same service.
-
-### List trains running between two stations
-
-```sh
-bundle exec bin/get-trains --from 08000105 --to 08000207
-bundle exec bin/get-trains --from 08000105,08098105 --to 08000207,08098207 --exclude-types FLX
-bundle exec bin/get-trains --from 08000105 --to 08000207 --out trains.txt
-```
-
-Prints an alphabetically sorted, deduplicated list of `train_name` values that connect the stations — no times, days, or counts. Accepts the same `--from`, `--to`, `--years`, `--exclude-types`, and `--data` options as `train-connections`. With `--out FILE` the list is written one-per-line; bare filenames land under `out/` (which is tracked but its contents are gitignored), paths with a directory component are used as-is. Without `--out`, names go to stdout below the `Window:` summary. Output files are consumable by `train-delay --train @FILE`.
 
 ### List trains per station for a from/to journey
 
