@@ -82,6 +82,17 @@ Frankfurt (Main) Hbf     08098105      210  S
 
 `PATTERN` is a SQL ILIKE pattern (`%` wildcards). A bare word is wrapped as `%word%`. The same physical station often has multiple EVAs — typically `08089xxx` / `08098xxx` for S-Bahn platforms and `0801xxxx` / `0800xxxx` for long-distance/regional.
 
+`--input FILE` replaces the positional `PATTERN` and processes one pattern per line in FILE (`#` comments and blank lines ignored; bare filenames resolve under `out/`). Useful for batch-resolving a list of cities — combine with `--out` (no value) so each pattern's EVA list lands in its own `out/station_<name>.txt`:
+
+```sh
+# out/cities.txt
+# berlin
+# regensburg
+# köln
+bundle exec bin/find-train-stations --input cities.txt --types ICE --out
+# → out/station_berlin.txt, out/station_regensburg.txt, out/station_koeln.txt
+```
+
 ### Connections between two stations
 
 ```sh
