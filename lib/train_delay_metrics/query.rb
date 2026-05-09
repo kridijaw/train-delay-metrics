@@ -172,75 +172,61 @@ module TrainDelayMetrics
     # ±30-minute span around an observed time-of-day minute that contains the
     # greatest number of disruption events.
     #
-    # In per-stop mode (no destination_evas), time-of-day is the row's
-    # `departure_planned_time` and only rows with one are considered (origin
-    # stops are excluded automatically; terminus stops have no departure and
-    # are also excluded).
+    # Three modes:
     #
-    # In destination-deduplicated mode (destination_evas given), time-of-day
-    # is the row's `arrival_planned_time` (so terminus stops still count) and
-    # the per-minute aggregation is taken over the deduplicated row set —
-    # one row per (train, calendar day) per the same QUALIFY rule used by
-    # run_many.
+    # * Per-stop (default — no destination_evas, no origin_evas). Time-of-day
+    #   is the row's `departure_planned_time` and only rows with one are
+    #   considered (origin stops are excluded automatically; terminus stops
+    #   have no departure and are also excluded).
+    #
+    # * Destination-arrival (destination_evas only). Time-of-day is the row's
+    #   `arrival_planned_time` (so terminus stops still count). The
+    #   per-minute aggregation is over the deduplicated row set — one row
+    #   per (train, calendar day) at the latest destination arrival, matching
+    #   run_many's tiebreaker.
+    #
+    # * Origin-departure (destination_evas + origin_evas). Trip identity and
+    #   the disruption flag still come from the destination row (matches the
+    #   headline counts), but the time-of-day shown is the train's *latest
+    #   departure* from any origin EVA on that same day. This is the
+    #   passenger-friendly "find the train in the timetable" time. Days
+    #   without an origin row in the data drop out of the peak aggregate
+    #   (the trip is still counted by run_many, just absent from this view).
     #
     # Trains with no matching rows are absent from the hash. Windows do not
     # wrap across midnight (a 23:50 center sees 23:20–24:00 only); sample
     # sizes there are tiny so this is rarely the peak window in practice.
-    def peak_windows(train_names:, station_eva: nil, station_evas: nil, destination_evas: nil, threshold_minutes:, years_back:)
+    def peak_windows(train_names:, station_eva: nil, station_evas: nil, destination_evas: nil, origin_evas: nil, threshold_minutes:, years_back:)
       names = Array(train_names).map(&:to_s).reject(&:empty?)
       raise ArgumentError, "train_names must not be empty" if names.empty?
 
-      dest_evas = Array(destination_evas).map(&:to_s).reject(&:empty?)
-      if dest_evas.any?
-        evas = dest_evas
-        dedup_by_day = true
-      else
+      dest_evas   = Array(destination_evas).map(&:to_s).reject(&:empty?)
+      origin_list = Array(origin_evas).map(&:to_s).reject(&:empty?)
+
+      mode = if dest_evas.any? && origin_list.any?
+               :origin_dep
+             elsif dest_evas.any?
+               :dest_arr
+             else
+               :per_stop
+             end
+
+      if mode == :per_stop
         evas = Array(station_evas).map(&:to_s).reject(&:empty?)
         evas = [station_eva.to_s] if evas.empty? && station_eva
-        dedup_by_day = false
+        raise ArgumentError, "station_eva, station_evas, or destination_evas must be provided" if evas.empty?
       end
-      raise ArgumentError, "station_eva, station_evas, or destination_evas must be provided" if evas.empty?
 
       train_placeholders = (["?"] * names.size).join(", ")
-      eva_placeholders   = (["?"] * evas.size).join(", ")
 
-      base_cte = if dedup_by_day
-                   # Use arrival_planned_time so terminus stops are included,
-                   # and dedupe to one row per (train, day) so a run touching
-                   # multiple destination EVAs is counted once at its latest
-                   # destination-EVA stop (matches run_many's tiebreaker).
-                   <<~SQL
-                     WITH base AS (
-                       SELECT train_name,
-                              arrival_planned_time AS time_of_day_ts,
-                              delay_in_min,
-                              is_canceled
-                       FROM read_parquet(?)
-                       WHERE train_name IN (#{train_placeholders})
-                         AND eva IN (#{eva_placeholders})
-                         AND arrival_planned_time IS NOT NULL
-                         AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 YEAR) * ?
-                       QUALIFY ROW_NUMBER() OVER (
-                         PARTITION BY train_name, CAST(arrival_planned_time AS DATE)
-                         ORDER BY arrival_planned_time DESC, eva DESC
-                       ) = 1
-                     ),
-                   SQL
-                 else
-                   <<~SQL
-                     WITH base AS (
-                       SELECT train_name,
-                              departure_planned_time AS time_of_day_ts,
-                              delay_in_min,
-                              is_canceled
-                       FROM read_parquet(?)
-                       WHERE train_name IN (#{train_placeholders})
-                         AND eva IN (#{eva_placeholders})
-                         AND departure_planned_time IS NOT NULL
-                         AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 YEAR) * ?
-                     ),
-                   SQL
-                 end
+      base_cte, base_binds = case mode
+                             when :origin_dep
+                               build_origin_dep_base_cte(train_placeholders, names, dest_evas, origin_list, years_back)
+                             when :dest_arr
+                               build_dest_arr_base_cte(train_placeholders, names, dest_evas, years_back)
+                             else
+                               build_per_stop_base_cte(train_placeholders, names, evas, years_back)
+                             end
 
       sql = base_cte + <<~SQL
         per_min AS (
@@ -284,7 +270,7 @@ module TrainDelayMetrics
       SQL
 
       stmt = connection.prepared_statement(sql)
-      binds = [@parquet_glob, *names, *evas, years_back, threshold_minutes]
+      binds = base_binds + [threshold_minutes]
       binds.each_with_index { |v, i| stmt.bind(i + 1, v) }
 
       out = {}
@@ -306,6 +292,98 @@ module TrainDelayMetrics
 
     def connection
       @connection ||= DuckDB::Database.new.connect
+    end
+
+    def build_per_stop_base_cte(train_placeholders, names, evas, years_back)
+      eva_placeholders = (["?"] * evas.size).join(", ")
+      cte = <<~SQL
+        WITH base AS (
+          SELECT train_name,
+                 departure_planned_time AS time_of_day_ts,
+                 delay_in_min,
+                 is_canceled
+          FROM read_parquet(?)
+          WHERE train_name IN (#{train_placeholders})
+            AND eva IN (#{eva_placeholders})
+            AND departure_planned_time IS NOT NULL
+            AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 YEAR) * ?
+        ),
+      SQL
+      [cte, [@parquet_glob, *names, *evas, years_back]]
+    end
+
+    def build_dest_arr_base_cte(train_placeholders, names, dest_evas, years_back)
+      eva_placeholders = (["?"] * dest_evas.size).join(", ")
+      cte = <<~SQL
+        WITH base AS (
+          SELECT train_name,
+                 arrival_planned_time AS time_of_day_ts,
+                 delay_in_min,
+                 is_canceled
+          FROM read_parquet(?)
+          WHERE train_name IN (#{train_placeholders})
+            AND eva IN (#{eva_placeholders})
+            AND arrival_planned_time IS NOT NULL
+            AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 YEAR) * ?
+          QUALIFY ROW_NUMBER() OVER (
+            PARTITION BY train_name, CAST(arrival_planned_time AS DATE)
+            ORDER BY arrival_planned_time DESC, eva DESC
+          ) = 1
+        ),
+      SQL
+      [cte, [@parquet_glob, *names, *dest_evas, years_back]]
+    end
+
+    # Trip identity + disruption flag from destination (latest arrival per
+    # day at any to-EVA); time-of-day from origin (latest departure per day
+    # at any from-EVA), joined on (train_name, calendar day). Days where
+    # origin or destination row is missing in the data are dropped from the
+    # peak aggregate.
+    def build_origin_dep_base_cte(train_placeholders, names, dest_evas, origin_evas, years_back)
+      dest_eva_placeholders   = (["?"] * dest_evas.size).join(", ")
+      origin_eva_placeholders = (["?"] * origin_evas.size).join(", ")
+      cte = <<~SQL
+        WITH dest AS (
+          SELECT train_name,
+                 CAST(arrival_planned_time AS DATE) AS day,
+                 delay_in_min,
+                 is_canceled
+          FROM read_parquet(?)
+          WHERE train_name IN (#{train_placeholders})
+            AND eva IN (#{dest_eva_placeholders})
+            AND arrival_planned_time IS NOT NULL
+            AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 YEAR) * ?
+          QUALIFY ROW_NUMBER() OVER (
+            PARTITION BY train_name, CAST(arrival_planned_time AS DATE)
+            ORDER BY arrival_planned_time DESC, eva DESC
+          ) = 1
+        ),
+        origin AS (
+          SELECT train_name,
+                 CAST(departure_planned_time AS DATE) AS day,
+                 departure_planned_time
+          FROM read_parquet(?)
+          WHERE train_name IN (#{train_placeholders})
+            AND eva IN (#{origin_eva_placeholders})
+            AND departure_planned_time IS NOT NULL
+            AND departure_planned_time >= CURRENT_DATE - (INTERVAL 1 YEAR) * ?
+          QUALIFY ROW_NUMBER() OVER (
+            PARTITION BY train_name, CAST(departure_planned_time AS DATE)
+            ORDER BY departure_planned_time DESC, eva DESC
+          ) = 1
+        ),
+        base AS (
+          SELECT d.train_name,
+                 o.departure_planned_time AS time_of_day_ts,
+                 d.delay_in_min,
+                 d.is_canceled
+          FROM dest d
+          JOIN origin o
+            ON d.train_name = o.train_name
+           AND d.day        = o.day
+        ),
+      SQL
+      [cte, [@parquet_glob, *names, *dest_evas, years_back, @parquet_glob, *names, *origin_evas, years_back]]
     end
   end
 end

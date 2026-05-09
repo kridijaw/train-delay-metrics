@@ -63,7 +63,13 @@ RSpec.describe TrainDelayMetrics::Query do
           -- it's 2 trips / 2 delayed.
           ('ICE 444', '8000900',  5, (CURRENT_DATE - INTERVAL  7 DAY) + INTERVAL '12:00:00', FALSE, (CURRENT_DATE - INTERVAL  7 DAY) + INTERVAL '12:00:00'),
           ('ICE 444', '8000901', 25, (CURRENT_DATE - INTERVAL  7 DAY) + INTERVAL '12:30:00', FALSE, (CURRENT_DATE - INTERVAL  7 DAY) + INTERVAL '12:30:00'),
-          ('ICE 444', '8000900', 30, (CURRENT_DATE - INTERVAL 14 DAY) + INTERVAL '12:00:00', FALSE, (CURRENT_DATE - INTERVAL 14 DAY) + INTERVAL '12:00:00')
+          ('ICE 444', '8000900', 30, (CURRENT_DATE - INTERVAL 14 DAY) + INTERVAL '12:00:00', FALSE, (CURRENT_DATE - INTERVAL 14 DAY) + INTERVAL '12:00:00'),
+          -- Matching origin rows for ICE 444 at 8000800 — departing at 11:00
+          -- on each of the two destination days. With origin_evas=[8000800]
+          -- and destination_evas=[8000900,8000901] the peak window picks up
+          -- 11:00 (origin departure) instead of 12:00 (destination arrival).
+          ('ICE 444', '8000800',  0, (CURRENT_DATE - INTERVAL  7 DAY) + INTERVAL '10:55:00', FALSE, (CURRENT_DATE - INTERVAL  7 DAY) + INTERVAL '11:00:00'),
+          ('ICE 444', '8000800',  0, (CURRENT_DATE - INTERVAL 14 DAY) + INTERVAL '10:55:00', FALSE, (CURRENT_DATE - INTERVAL 14 DAY) + INTERVAL '11:00:00')
         )
       ) TO '#{parquet}' (FORMAT PARQUET);
     SQL
@@ -176,6 +182,24 @@ RSpec.describe TrainDelayMetrics::Query do
     # count and rate so the earlier one wins the tiebreaker.
     expect(peak.weekday).to eq(Date.today.wday)
     expect(peak.center_hhmm).to eq("12:00")
+    expect(peak.scheduled).to eq(2)
+    expect(peak.disrupted).to eq(2)
+  end
+
+  it "peak_windows uses origin departure_planned_time when origin_evas is given" do
+    peaks = described_class.new(parquet_glob: glob).peak_windows(
+      train_names: ["ICE 444"],
+      destination_evas: ["8000900", "8000901"],
+      origin_evas:      ["8000800"],
+      threshold_minutes: 20, years_back: 3
+    )
+    peak = peaks["ICE 444"]
+    expect(peak).not_to be_nil
+    # Time-of-day comes from the 8000800 origin row's departure (11:00 on
+    # both days), but the disruption flag still comes from the destination
+    # dedup (both days are disrupted as before).
+    expect(peak.weekday).to eq(Date.today.wday)
+    expect(peak.center_hhmm).to eq("11:00")
     expect(peak.scheduled).to eq(2)
     expect(peak.disrupted).to eq(2)
   end

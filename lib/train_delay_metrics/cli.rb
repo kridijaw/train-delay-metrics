@@ -153,23 +153,34 @@ module TrainDelayMetrics
 
         # If the group declares a `to` array (newer JSON format), measure
         # delay at the destination and de-dup to one row per (train, day).
-        # Otherwise fall back to per-stop counting against the union of EVAs.
-        to_evas = Array(g["to"]).map(&:to_s).reject(&:empty?)
-        run_args = {
+        # When `from` is also present, the peak window uses origin departure
+        # time (passenger-friendly "find the train" time) — the run_many
+        # counts and disruption flag still come from the destination side.
+        # Legacy JSON without a `to` array falls back to per-stop mode.
+        to_evas   = Array(g["to"]).map(&:to_s).reject(&:empty?)
+        from_evas = Array(g["from"]).map(&:to_s).reject(&:empty?)
+        common = {
           train_names:       trains,
           threshold_minutes: options[:threshold_minutes],
           years_back:        options[:years_back]
         }
         if to_evas.any?
-          run_args[:destination_evas] = to_evas
-          time_source = :arrival
+          run_args  = common.merge(destination_evas: to_evas)
+          peak_args = common.merge(destination_evas: to_evas)
+          if from_evas.any?
+            peak_args[:origin_evas] = from_evas
+            time_source = :departure  # from-EVA departure
+          else
+            time_source = :arrival
+          end
         else
-          run_args[:station_evas] = evas
+          run_args  = common.merge(station_evas: evas)
+          peak_args = common.merge(station_evas: evas)
           time_source = :departure
         end
 
         results = query.run_many(**run_args)
-        peaks   = query.peak_windows(**run_args)
+        peaks   = query.peak_windows(**peak_args)
         with_data = results.reject { |r| r.total_trips.zero? && r.canceled_trips.zero? }
         if with_data.empty?
           stdout.puts "  No trips found in the last #{options[:years_back]} year(s)."

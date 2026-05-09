@@ -48,7 +48,11 @@ Peak dep window (±30m):          Sun 20:51 (31.91%, 30 of 94)
 
 `Peak <kind> window (±30m)` is the `(weekday, time-of-day)` bucket where the train accumulated the most disruptions (delayed ≥ threshold OR canceled), summed over a ±30 minute span centered on an observed minute *on that same weekday*. Ranking is by absolute disruption count (not rate), so a single 100%-disrupted run at an off-hour can't win. The reported percentage is `disrupted / scheduled` inside that bucket. The window does not wrap across midnight or across weekdays.
 
-The `<kind>` reflects the time source for the queried row set: `dep` (`departure_planned_time`) in per-stop mode (`--station` or `--input` against a legacy JSON without a `to` array), and `arr` (`arrival_planned_time` at the destination EVA) in destination-dedup mode (`--input` against a JSON with a `to` array). The multi-train table column is labelled `Dep Peak D+C` or `Arr Peak D+C` accordingly; the cell is the compact `DDD HH:MM NN%` form (e.g. `Wed 21:31  97%`).
+The `<kind>` reflects the time source for the queried row set:
+
+* **`dep` per-stop** (`--station` or `--input` against a legacy JSON without a `to` array): `departure_planned_time` at the queried stop.
+* **`arr` destination arrival** (`--input` with a `to` array but no `from`): `arrival_planned_time` at the destination EVA — useful when the user only specified destinations.
+* **`dep` origin departure** (`--input` with both `from` and `to` arrays — the default for any JSON written by current `trains-by-station --out`): the train's *latest* `departure_planned_time` from any from-EVA on that same day. Trip identity and the disruption flag still come from the destination side, so the headline counts are unchanged; the peak time is just relabelled to what a passenger would search for in the timetable. The multi-train table column is labelled `Dep Peak D+C` or `Arr Peak D+C` accordingly; the cell is the compact `DDD HH:MM NN%` form (e.g. `Wed 15:53  97%`).
 
 With multiple `--train` values the output switches to a compact table sorted by delay probability descending. Trains with no observed trips in the window are omitted.
 
