@@ -10,8 +10,8 @@ module TrainDelayMetrics
       options = { parquet_glob: Query::DEFAULT_GLOB, train_types: [], out: nil }
 
       parser = OptionParser.new do |o|
-        o.banner = %{Usage: find-train-stations PATTERN [options]
-                find-train-stations --input FILE [options]
+        o.banner = %{Usage: find-stations PATTERN [options]
+                find-stations --input FILE [options]
 
   PATTERN is a SQL ILIKE pattern, e.g. "berlin sp%" or "%frankfurt%".
   If you pass a bare word, it is wrapped as %word%.

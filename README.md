@@ -11,8 +11,8 @@ Commercial sources (e.g. Zugfinder Pro) cap historical statistical lookback at ~
 - [Install](#install)
 - [Get the dataset](#get-the-dataset)
 - [Workflow](#workflow)
-- [1. `find-train-stations` — find EVAs](#1-find-train-stations--find-evas)
-- [2. `trains-by-station` — map trains to from/to EVAs](#2-trains-by-station--map-trains-to-fromto-evas)
+- [1. `find-stations` — find EVAs](#1-find-stations--find-evas)
+- [2. `find-trains` — map trains to from/to EVAs](#2-find-trains--map-trains-to-fromto-evas)
 - [3. `train-delay` — compute delay statistics](#3-train-delay--compute-delay-statistics)
 - [Schema reference](#schema-reference)
 - [Test](#test)
@@ -39,19 +39,19 @@ Files land in `data/deutsche_bahn/`. Re-runs are idempotent. Months that don't e
 
 The three CLIs are designed to compose. A typical session walks through the pipeline:
 
-1. **`find-train-stations`** — given a city or pattern, list the EVAs (Deutsche Bahn station ids) that match.
-2. **`trains-by-station`** — given from-EVAs and to-EVAs, list the trains that connect them and write an EVAs↔trains JSON file.
+1. **`find-stations`** — given a city or pattern, list the EVAs (Deutsche Bahn station ids) that match.
+2. **`find-trains`** — given from-EVAs and to-EVAs, list the trains that connect them and write an EVAs↔trains JSON file.
 3. **`train-delay`** — read that JSON file (or matching EVAs/trains directly) and compute per-train delay/cancellation statistics.
 
 Files written by each step land under `out/` (gitignored). The next step's flag picks them up by short name (`--from @berlin` resolves to `out/station_berlin.txt`; `--input berlin_to_regensburg` resolves to `out/tbs_berlin_to_regensburg.json`). Umlauts are auto-transliterated during lookup (`ü→ue`, `ö→oe`, `ä→ae`, `ß→ss`).
 
-## 1. `find-train-stations` — find EVAs
+## 1. `find-stations` — find EVAs
 
 ```sh
-bundle exec bin/find-train-stations frankfurt
-bundle exec bin/find-train-stations "berlin sp%"                                     # SQL ILIKE pattern
-bundle exec bin/find-train-stations frankfurt --types IC,ICE                         # only EVAs with IC/ICE service
-bundle exec bin/find-train-stations frankfurt --types IC,ICE --out                   # writes out/station_frankfurt.txt
+bundle exec bin/find-stations frankfurt
+bundle exec bin/find-stations "berlin sp%"                                     # SQL ILIKE pattern
+bundle exec bin/find-stations frankfurt --types IC,ICE                         # only EVAs with IC/ICE service
+bundle exec bin/find-stations frankfurt --types IC,ICE --out                   # writes out/station_frankfurt.txt
 ```
 
 ```
@@ -80,15 +80,15 @@ köln
 ```
 
 ```sh
-bundle exec bin/find-train-stations --input cities.txt --types ICE --out
+bundle exec bin/find-stations --input cities.txt --types ICE --out
 # → out/station_berlin.txt, out/station_regensburg.txt, out/station_koeln.txt
 ```
 
-## 2. `trains-by-station` — map trains to from/to EVAs
+## 2. `find-trains` — map trains to from/to EVAs
 
 ```sh
-bundle exec bin/trains-by-station --from 08000105,08098105 --to 08000207,08098207
-bundle exec bin/trains-by-station --from @berlin --to @regensburg --months 6 --out
+bundle exec bin/find-trains --from 08000105,08098105 --to 08000207,08098207
+bundle exec bin/find-trains --from @berlin --to @regensburg --months 6 --out
 ```
 
 ```
@@ -112,10 +112,10 @@ Each side accepts one of:
 - **`all`** — expands to every `out/station_*.txt` file. Combined with the other side it iterates the cartesian product, skipping pairs where from and to are the same file. With `--out` (auto), each pair writes its own JSON file:
 
   ```sh
-  bundle exec bin/find-train-stations berlin     --types ICE --out
-  bundle exec bin/find-train-stations regensburg --types ICE --out
-  bundle exec bin/find-train-stations koeln      --types ICE --out
-  bundle exec bin/trains-by-station --from all --to all --years 1 --group-by-stops --out
+  bundle exec bin/find-stations berlin     --types ICE --out
+  bundle exec bin/find-stations regensburg --types ICE --out
+  bundle exec bin/find-stations koeln      --types ICE --out
+  bundle exec bin/find-trains --from all --to all --years 1 --group-by-stops --out
   # → out/tbs_berlin_to_regensburg.json, out/tbs_berlin_to_koeln.json, ...
   ```
 
@@ -135,7 +135,7 @@ Replaces `--from`/`--to` and reads pairs from FILE, one per line as `<from_spec>
 ```
 
 ```sh
-bundle exec bin/trains-by-station --input journeys.txt --years 1 --group-by-stops --out
+bundle exec bin/find-trains --input journeys.txt --years 1 --group-by-stops --out
 ```
 
 ### `--group-by-stops`
@@ -187,7 +187,7 @@ Drops train types like `FLX` (FlixTrain) or `DPF` (charter) before grouping, e.g
 bundle exec bin/train-delay --train "ICE 821" --station 08000105 --threshold-minutes 20 --years 3
 # Multiple trains, sorted by delay probability (high to low):
 bundle exec bin/train-delay --train "ICE 821,ICE 825,ICE 824" --station 08000105 --threshold-minutes 20
-# Driven by a JSON file written by trains-by-station --out:
+# Driven by a JSON file written by find-trains --out:
 bundle exec bin/train-delay --input berlin_to_regensburg --months 6 --threshold-minutes 20
 ```
 
@@ -230,7 +230,7 @@ ICE 824      201        6       16     7.96    10.63  Wed 07:08  15%
 | --- | --- | --- |
 | `dep` per-stop | `--station EVA`, or `--input` against a legacy JSON without a `to` array | `departure_planned_time` at the queried stop |
 | `arr` destination arrival | `--input` with a `to` array but no `from` | `arrival_planned_time` at the destination EVA |
-| `dep` origin departure | `--input` with both `from` and `to` (default for any JSON written by current `trains-by-station --out`) | the train's *latest* `departure_planned_time` from any from-EVA on the same calendar day |
+| `dep` origin departure | `--input` with both `from` and `to` (default for any JSON written by current `find-trains --out`) | the train's *latest* `departure_planned_time` from any from-EVA on the same calendar day |
 
 In origin-departure mode the trip count and disruption flag still come from the destination side — only the time-of-day on display switches to the passenger's boarding time.
 
@@ -244,7 +244,7 @@ When a group has a `to` array, `train-delay` measures delay at the destination a
 | --- | --- | --- |
 | `--train` | `"ICE 821"`, `"ICE 821,ICE 825"`, or `@FILE` | train name(s); exact `train_name` as in the dataset (with prefix). `@FILE` reads newline-separated names; bare names resolve against the cwd then `out/`. |
 | `--station` | `08000105` | EVA, **zero-padded to 8 digits, as a string** |
-| `--input` | `berlin_to_regensburg` | JSON file from `trains-by-station --out`. Resolved literally → `out/<name>` → `out/<name>.json` → `out/tbs_<name>` → `out/tbs_<name>.json` (umlauts transliterated). `--input all` iterates every `out/tbs_*.json`. |
+| `--input` | `berlin_to_regensburg` | JSON file from `find-trains --out`. Resolved literally → `out/<name>` → `out/<name>.json` → `out/tbs_<name>` → `out/tbs_<name>.json` (umlauts transliterated). `--input all` iterates every `out/tbs_*.json`. |
 | `--threshold-minutes` | `20` | minimum delay (inclusive) to count |
 | `--years` | `3` | lookback window from today, in years (default `3`). Mutually exclusive with `--months`. |
 | `--months` | `6` | lookback window from today, in months. Mutually exclusive with `--years`. |

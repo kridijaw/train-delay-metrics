@@ -2,7 +2,7 @@ require "fileutils"
 require "stringio"
 require "tmpdir"
 
-RSpec.describe TrainDelayMetrics::TrainsByStationCLI do
+RSpec.describe TrainDelayMetrics::FindTrainsCLI do
   describe ".parse_input_pairs" do
     let(:tmpdir) { Dir.mktmpdir("tbs-input-spec") }
     let(:path)   { File.join(tmpdir, "pairs.txt") }

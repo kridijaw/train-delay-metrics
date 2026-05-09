@@ -6,4 +6,4 @@ end
 $LOAD_PATH.unshift(File.expand_path("../lib", __dir__))
 require "train_delay_metrics"
 
-exit TrainDelayMetrics::TrainsByStationCLI.run(ARGV)
+exit TrainDelayMetrics::FindTrainsCLI.run(ARGV)

@@ -6,7 +6,7 @@ require "optparse"
 require_relative "connections"
 
 module TrainDelayMetrics
-  class TrainsByStationCLI
+  class FindTrainsCLI
     OUT_DIR = "out".freeze
 
     def self.run(argv, stdout: $stdout, stderr: $stderr)
@@ -21,11 +21,11 @@ module TrainDelayMetrics
       }
 
       parser = OptionParser.new do |o|
-        o.banner = %q{Usage: trains-by-station --from SPEC --to SPEC [options]
+        o.banner = %q{Usage: find-trains --from SPEC --to SPEC [options]
 
   --from / --to accept either a comma-separated EVA list ("08000105,08098105")
   or @FILE to read newline-separated EVAs from a file (bare names also
-  resolved against out/, e.g. those produced by find-train-stations --out).
+  resolved against out/, e.g. those produced by find-stations --out).
 
   For each EVA in the union of --from / --to, prints the alphabetically
   sorted list of trains that touch that EVA and connect any from-EVA to
@@ -194,7 +194,7 @@ module TrainDelayMetrics
       if options[:"#{side}_all"]
         files = Dir.glob(File.join(OUT_DIR, "station_*.txt")).sort
         if files.empty?
-          stderr.puts %{--#{side} all: no station_*.txt files found in #{OUT_DIR}/. Run find-train-stations --out first.}
+          stderr.puts %{--#{side} all: no station_*.txt files found in #{OUT_DIR}/. Run find-stations --out first.}
           return nil
         end
         files.map { |p| "@#{File.basename(p)}" }

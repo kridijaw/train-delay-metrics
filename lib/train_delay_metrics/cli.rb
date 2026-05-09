@@ -23,7 +23,7 @@ module TrainDelayMetrics
   @FILE to read newline-separated names from FILE.
 
   --input replaces both --train and --station: it reads a JSON file written by
-  `trains-by-station --out`, where each entry maps a list of EVAs to a list of
+  `find-trains --out`, where each entry maps a list of EVAs to a list of
   trains. The delay query runs once per group, with delay measured at any of
   the group's EVAs.}
         o.on("--train SPEC", %q{Train name(s): comma-separated list or @FILE (bare names also resolved against out/)}) do |v|
@@ -40,7 +40,7 @@ module TrainDelayMetrics
           end
         end
         o.on("--station EVA",  "EVA station number, e.g. 8000105 (Frankfurt Hbf)") { |v| options[:station_eva] = v }
-        o.on("--input FILE",   %q{JSON file from `trains-by-station --out` (bare names also resolved against out/). Use "all" to run every out/tbs_*.json. Replaces --train/--station.}) do |v|
+        o.on("--input FILE",   %q{JSON file from `find-trains --out` (bare names also resolved against out/). Use "all" to run every out/tbs_*.json. Replaces --train/--station.}) do |v|
           if v == "all"
             options[:input_all] = true
           else
@@ -110,7 +110,7 @@ module TrainDelayMetrics
       if options[:input_all]
         files = Dir.glob(File.join("out", "tbs_*.json")).sort
         if files.empty?
-          stderr.puts %{--input all: no out/tbs_*.json files found. Run trains-by-station --out first.}
+          stderr.puts %{--input all: no out/tbs_*.json files found. Run find-trains --out first.}
           return 1
         end
         files.each_with_index do |f, i|
@@ -269,7 +269,7 @@ module TrainDelayMetrics
     end
 
     # Group title for `train-delay --input`. Uses the new `from`/`to`/`stations`
-    # keys when present (writing them is now the default in trains-by-station)
+    # keys when present (writing them is now the default in find-trains)
     # so the title reads "<from-stations> -> <to-stations>". Falls back to a
     # bare EVA list for older JSON files that lack those keys.
     def self.format_group_title(g, evas)
