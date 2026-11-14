@@ -104,6 +104,25 @@ RSpec.describe TrainDelayMetrics::Query do
     expect(deduped.delay_percentage).to be_within(0.001).of(100.0)
   end
 
+  it "destination dedup keeps the worst outcome among tied coupled portions" do
+    deduped = described_class.new(parquet_glob: glob).run_many(
+      train_names: ["NJ"], destination_evas: ["8000950"],
+      threshold_minutes: 20, months_back: 36
+    ).first
+
+    expect(deduped.total_trips).to eq(1)
+    expect(deduped.canceled_trips).to eq(1)
+    expect(deduped.delayed_trips).to eq(1)
+
+    peak = described_class.new(parquet_glob: glob).peak_windows(
+      train_names: ["NJ"], destination_evas: ["8000950"],
+      threshold_minutes: 20, months_back: 36
+    )["NJ"]
+    expect(peak.center_hhmm).to eq("22:23")
+    expect(peak.scheduled).to eq(2)
+    expect(peak.disrupted).to eq(2)
+  end
+
   it "peak_windows in destination mode uses arrival_planned_time so terminus stops count" do
     peaks = described_class.new(parquet_glob: glob).peak_windows(
       train_names: ["ICE 444"], destination_evas: ["8000900", "8000901"],

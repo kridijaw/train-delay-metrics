@@ -56,6 +56,14 @@ COPY (
     -- and destination_evas=[8000900,8000901] the peak window picks up
     -- 11:00 (origin departure) instead of 12:00 (destination arrival).
     ('ICE 444', '8000800',  0, (CURRENT_DATE - INTERVAL  7 DAY) + INTERVAL '10:55:00', FALSE, (CURRENT_DATE - INTERVAL  7 DAY) + INTERVAL '11:00:00'),
-    ('ICE 444', '8000800',  0, (CURRENT_DATE - INTERVAL 14 DAY) + INTERVAL '10:55:00', FALSE, (CURRENT_DATE - INTERVAL 14 DAY) + INTERVAL '11:00:00')
+    ('ICE 444', '8000800',  0, (CURRENT_DATE - INTERVAL 14 DAY) + INTERVAL '10:55:00', FALSE, (CURRENT_DATE - INTERVAL 14 DAY) + INTERVAL '11:00:00'),
+    -- NJ: coupled portions under one generic name, tied on arrival time and
+    -- EVA. Day 1: one runs on time, one is canceled. Day 2: 10 and 30 min.
+    -- The destination dedup keeps the worst portion: 1 trip, 1 canceled,
+    -- 1 delayed.
+    ('NJ', '8000950',  0, (CURRENT_DATE - INTERVAL  7 DAY) + INTERVAL '22:23:00', FALSE, NULL),
+    ('NJ', '8000950',  0, (CURRENT_DATE - INTERVAL  7 DAY) + INTERVAL '22:23:00', TRUE,  NULL),
+    ('NJ', '8000950', 10, (CURRENT_DATE - INTERVAL 14 DAY) + INTERVAL '22:23:00', FALSE, NULL),
+    ('NJ', '8000950', 30, (CURRENT_DATE - INTERVAL 14 DAY) + INTERVAL '22:23:00', FALSE, NULL)
   )
 ) TO '__OUT__' (FORMAT PARQUET);

@@ -237,7 +237,7 @@ In origin-departure mode the trip count and disruption flag still come from the 
 
 ### Destination de-duplication (`--input` with `to`)
 
-When a group has a `to` array, `train-delay` measures delay at the destination and de-dupes to one row per `(train, calendar day)`, keeping the train's *latest* arrival among the destination EVAs that day. So a service that stops at both Köln Messe/Deutz and Köln Hbf on the same run is scored at Köln Hbf (the final stop), modelling a passenger journey rather than station throughput. Older JSON files without a `to` array fall back to per-stop counting against the union of EVAs.
+When a group has a `to` array, `train-delay` measures delay at the destination and de-dupes to one row per `(train, calendar day)`, keeping the train's *latest* arrival among the destination EVAs that day. So a service that stops at both Köln Messe/Deutz and Köln Hbf on the same run is scored at Köln Hbf (the final stop), modelling a passenger journey rather than station throughput. When coupled portions share a generic name such as `NJ` and arrive at the same time, the worst outcome counts: a canceled portion first, then the larger delay. Older JSON files without a `to` array fall back to per-stop counting against the union of EVAs.
 
 ### Argument syntax
 

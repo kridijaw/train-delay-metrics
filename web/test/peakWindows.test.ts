@@ -34,6 +34,16 @@ describe("peak windows (spec/fixtures/query_events.sql)", () => {
     expect(peaks.size).toBe(0);
   });
 
+  it("in destination mode keeps the worst outcome among tied coupled portions", async () => {
+    const peaks = await peakWindows(db, { trainNames: ["NJ"], destinationEvas: ["8000950"], thresholdMinutes: 20, monthsBack: 36 });
+
+    const peak = peaks.get("NJ");
+    expect(peak).toBeDefined();
+    expect(centerHhmm(peak!)).toBe("22:23");
+    expect(peak!.scheduled).toBe(2);
+    expect(peak!.disrupted).toBe(2);
+  });
+
   it("in destination mode uses arrival_planned_time so terminus stops count", async () => {
     const peaks = await peakWindows(db, {
       trainNames: ["ICE 444"],

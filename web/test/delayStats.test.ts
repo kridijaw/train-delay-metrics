@@ -69,6 +69,19 @@ describe("delay stats (spec/fixtures/query_events.sql)", () => {
     expectWithin(deduped.delayPercentage, 100.0);
   });
 
+  it("destination dedup keeps the worst outcome among tied coupled portions", async () => {
+    const [deduped] = await runMany(db, {
+      trainNames: ["NJ"],
+      destinationEvas: ["8000950"],
+      thresholdMinutes: 20,
+      monthsBack: 36,
+    });
+
+    expect(deduped.totalTrips).toBe(1);
+    expect(deduped.canceledTrips).toBe(1);
+    expect(deduped.delayedTrips).toBe(1);
+  });
+
   it("runMany returns multiple trains sorted by delay probability descending", async () => {
     const results = await runMany(db, {
       trainNames: ["ICE 802", "ICE 999", "ICE 555", "ICE 0000"],
