@@ -1,4 +1,4 @@
-require "duckdb"
+require_relative "sql"
 
 module TrainDelayMetrics
   class Query
@@ -93,63 +93,16 @@ module TrainDelayMetrics
       end
       raise ArgumentError, "station_eva, station_evas, or destination_evas must be provided" if evas.empty?
 
-      train_placeholders = (["?"] * names.size).join(", ")
-      eva_placeholders   = (["?"] * evas.size).join(", ")
-
-      # total_trips counts only trips that ran (is_canceled = FALSE) so that
-      # delay_percentage = delayed_trips / total_trips means "given the train
-      # ran, was it late?". canceled_trips is reported alongside as a separate
-      # failure mode — it doesn't get folded into the percentage.
-      filter_cte = if dedup_by_day
-                     # Keep only the latest arrival per (train, day) so a run
-                     # touching multiple destination EVAs is counted once,
-                     # at its final destination-EVA stop.
-                     <<~SQL
-                       WITH base AS (
-                         SELECT train_name, eva, delay_in_min, is_canceled, arrival_planned_time
-                         FROM read_parquet(?)
-                         WHERE train_name IN (#{train_placeholders})
-                           AND eva IN (#{eva_placeholders})
-                           AND arrival_planned_time IS NOT NULL
-                           AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 MONTH) * ?
-                         QUALIFY ROW_NUMBER() OVER (
-                           PARTITION BY train_name, CAST(arrival_planned_time AS DATE)
-                           ORDER BY arrival_planned_time DESC, eva DESC
-                         ) = 1
-                       )
-                     SQL
-                   else
-                     <<~SQL
-                       WITH base AS (
-                         SELECT train_name, delay_in_min, is_canceled
-                         FROM read_parquet(?)
-                         WHERE train_name IN (#{train_placeholders})
-                           AND eva IN (#{eva_placeholders})
-                           AND arrival_planned_time IS NOT NULL
-                           AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 MONTH) * ?
-                       )
-                     SQL
-                   end
-
-      sql = filter_cte + <<~SQL
-        SELECT train_name,
-               COUNT(*) FILTER (WHERE is_canceled = FALSE)                              AS total_trips,
-               COUNT(*) FILTER (WHERE is_canceled = TRUE)                               AS canceled_trips,
-               COUNT(*) FILTER (WHERE is_canceled = FALSE AND delay_in_min >= ?)        AS delayed_trips,
-               CASE WHEN COUNT(*) FILTER (WHERE is_canceled = FALSE) = 0 THEN NULL
-                    ELSE 100.0 * COUNT(*) FILTER (WHERE is_canceled = FALSE AND delay_in_min >= ?)
-                               / COUNT(*) FILTER (WHERE is_canceled = FALSE)
-               END                                                                      AS delay_percentage
-        FROM base
-        GROUP BY train_name
-      SQL
-
-      stmt = connection.prepared_statement(sql)
-      binds = [@parquet_glob, *names, *evas, months_back, threshold_minutes, threshold_minutes]
-      binds.each_with_index { |v, i| stmt.bind(i + 1, v) }
+      base = dedup_by_day ? "delay_base_destination" : "delay_base_per_stop"
+      rows = Sql.query(connection, [base, "delay_stats"], {
+        train_names: names,
+        evas:        evas,
+        cutoff:      Sql.cutoff(months_back),
+        threshold:   threshold_minutes
+      })
 
       seen = {}
-      stmt.execute.each do |row|
+      rows.each do |row|
         seen[row[0]] = Result.new(
           train_name:       row[0],
           total_trips:      row[1].to_i,
@@ -217,64 +170,16 @@ module TrainDelayMetrics
         raise ArgumentError, "station_eva, station_evas, or destination_evas must be provided" if evas.empty?
       end
 
-      train_placeholders = (["?"] * names.size).join(", ")
-
-      base_cte, base_binds = case mode
-                             when :origin_dep
-                               build_origin_dep_base_cte(train_placeholders, names, dest_evas, origin_list, months_back)
-                             when :dest_arr
-                               build_dest_arr_base_cte(train_placeholders, names, dest_evas, months_back)
-                             else
-                               build_per_stop_base_cte(train_placeholders, names, evas, months_back)
-                             end
-
-      sql = base_cte + <<~SQL
-        per_min AS (
-          SELECT train_name,
-                 EXTRACT(DOW FROM time_of_day_ts)::INTEGER                                 AS weekday,
-                 (EXTRACT(HOUR FROM time_of_day_ts) * 60
-                  + EXTRACT(MINUTE FROM time_of_day_ts))::INTEGER                          AS dep_min,
-                 COUNT(*)                                                                  AS scheduled,
-                 COUNT(*) FILTER (WHERE is_canceled OR delay_in_min >= ?)                  AS disrupted
-          FROM base
-          GROUP BY train_name, weekday, dep_min
-        ),
-        windowed AS (
-          SELECT a.train_name,
-                 a.weekday                AS weekday,
-                 a.dep_min                AS center_min,
-                 SUM(b.scheduled)         AS w_scheduled,
-                 SUM(b.disrupted)         AS w_disrupted
-          FROM per_min a
-          JOIN per_min b
-            ON a.train_name = b.train_name
-           AND a.weekday    = b.weekday
-           AND b.dep_min BETWEEN a.dep_min - 30 AND a.dep_min + 30
-          GROUP BY a.train_name, a.weekday, a.dep_min
-        ),
-        ranked AS (
-          SELECT train_name, weekday, center_min, w_scheduled, w_disrupted,
-                 ROW_NUMBER() OVER (
-                   PARTITION BY train_name
-                   ORDER BY w_disrupted DESC,
-                            CASE WHEN w_scheduled = 0 THEN 0
-                                 ELSE w_disrupted::DOUBLE / w_scheduled END DESC,
-                            weekday    ASC,
-                            center_min ASC
-                 ) AS rn
-          FROM windowed
-        )
-        SELECT train_name, weekday, center_min, w_scheduled, w_disrupted
-        FROM ranked
-        WHERE rn = 1
-      SQL
-
-      stmt = connection.prepared_statement(sql)
-      binds = base_binds + [threshold_minutes]
-      binds.each_with_index { |v, i| stmt.bind(i + 1, v) }
+      rows = Sql.query(connection, ["peak_base_#{mode}", "peak_windows"], {
+        train_names: names,
+        evas:        mode == :per_stop ? evas : dest_evas,
+        origin_evas: origin_list,
+        cutoff:      Sql.cutoff(months_back),
+        threshold:   threshold_minutes
+      })
 
       out = {}
-      stmt.execute.each do |row|
+      rows.each do |row|
         sched   = row[3].to_i
         disrupt = row[4].to_i
         out[row[0]] = PeakWindow.new(
@@ -291,99 +196,7 @@ module TrainDelayMetrics
     private
 
     def connection
-      @connection ||= DuckDB::Database.new.connect
-    end
-
-    def build_per_stop_base_cte(train_placeholders, names, evas, months_back)
-      eva_placeholders = (["?"] * evas.size).join(", ")
-      cte = <<~SQL
-        WITH base AS (
-          SELECT train_name,
-                 departure_planned_time AS time_of_day_ts,
-                 delay_in_min,
-                 is_canceled
-          FROM read_parquet(?)
-          WHERE train_name IN (#{train_placeholders})
-            AND eva IN (#{eva_placeholders})
-            AND departure_planned_time IS NOT NULL
-            AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 MONTH) * ?
-        ),
-      SQL
-      [cte, [@parquet_glob, *names, *evas, months_back]]
-    end
-
-    def build_dest_arr_base_cte(train_placeholders, names, dest_evas, months_back)
-      eva_placeholders = (["?"] * dest_evas.size).join(", ")
-      cte = <<~SQL
-        WITH base AS (
-          SELECT train_name,
-                 arrival_planned_time AS time_of_day_ts,
-                 delay_in_min,
-                 is_canceled
-          FROM read_parquet(?)
-          WHERE train_name IN (#{train_placeholders})
-            AND eva IN (#{eva_placeholders})
-            AND arrival_planned_time IS NOT NULL
-            AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 MONTH) * ?
-          QUALIFY ROW_NUMBER() OVER (
-            PARTITION BY train_name, CAST(arrival_planned_time AS DATE)
-            ORDER BY arrival_planned_time DESC, eva DESC
-          ) = 1
-        ),
-      SQL
-      [cte, [@parquet_glob, *names, *dest_evas, months_back]]
-    end
-
-    # Trip identity + disruption flag from destination (latest arrival per
-    # day at any to-EVA); time-of-day from origin (latest departure per day
-    # at any from-EVA), joined on (train_name, calendar day). Days where
-    # origin or destination row is missing in the data are dropped from the
-    # peak aggregate.
-    def build_origin_dep_base_cte(train_placeholders, names, dest_evas, origin_evas, months_back)
-      dest_eva_placeholders   = (["?"] * dest_evas.size).join(", ")
-      origin_eva_placeholders = (["?"] * origin_evas.size).join(", ")
-      cte = <<~SQL
-        WITH dest AS (
-          SELECT train_name,
-                 CAST(arrival_planned_time AS DATE) AS day,
-                 delay_in_min,
-                 is_canceled
-          FROM read_parquet(?)
-          WHERE train_name IN (#{train_placeholders})
-            AND eva IN (#{dest_eva_placeholders})
-            AND arrival_planned_time IS NOT NULL
-            AND arrival_planned_time >= CURRENT_DATE - (INTERVAL 1 MONTH) * ?
-          QUALIFY ROW_NUMBER() OVER (
-            PARTITION BY train_name, CAST(arrival_planned_time AS DATE)
-            ORDER BY arrival_planned_time DESC, eva DESC
-          ) = 1
-        ),
-        origin AS (
-          SELECT train_name,
-                 CAST(departure_planned_time AS DATE) AS day,
-                 departure_planned_time
-          FROM read_parquet(?)
-          WHERE train_name IN (#{train_placeholders})
-            AND eva IN (#{origin_eva_placeholders})
-            AND departure_planned_time IS NOT NULL
-            AND departure_planned_time >= CURRENT_DATE - (INTERVAL 1 MONTH) * ?
-          QUALIFY ROW_NUMBER() OVER (
-            PARTITION BY train_name, CAST(departure_planned_time AS DATE)
-            ORDER BY departure_planned_time DESC, eva DESC
-          ) = 1
-        ),
-        base AS (
-          SELECT d.train_name,
-                 o.departure_planned_time AS time_of_day_ts,
-                 d.delay_in_min,
-                 d.is_canceled
-          FROM dest d
-          JOIN origin o
-            ON d.train_name = o.train_name
-           AND d.day        = o.day
-        ),
-      SQL
-      [cte, [@parquet_glob, *names, *dest_evas, months_back, @parquet_glob, *names, *origin_evas, months_back]]
+      @connection ||= Sql.connect(@parquet_glob)
     end
   end
 end

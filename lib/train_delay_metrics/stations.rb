@@ -1,4 +1,4 @@
-require "duckdb"
+require_relative "sql"
 
 module TrainDelayMetrics
   class Stations
@@ -12,27 +12,9 @@ module TrainDelayMetrics
     def run(name_pattern:, train_types: nil)
       types = Array(train_types).map { |t| t.to_s.strip }.reject(&:empty?)
 
-      sql = +<<~SQL
-        SELECT station_name,
-               eva,
-               list(DISTINCT train_type ORDER BY train_type) AS train_types,
-               COUNT(DISTINCT train_line_ride_id) AS trains
-        FROM read_parquet(?)
-        WHERE station_name ILIKE ?
-      SQL
-      binds = [@parquet_glob, name_pattern]
+      rows = Sql.query(connection, ["stations"], { name_pattern: name_pattern, train_types: types })
 
-      unless types.empty?
-        sql << "  AND train_type IN (#{(['?'] * types.size).join(', ')})\n"
-        binds.concat(types)
-      end
-
-      sql << "GROUP BY station_name, eva\nORDER BY station_name, trains DESC;"
-
-      stmt = connection.prepared_statement(sql)
-      binds.each_with_index { |v, i| stmt.bind(i + 1, v) }
-
-      stmt.execute.map do |row|
+      rows.map do |row|
         Station.new(
           station_name: row[0],
           eva:          row[1],
@@ -45,7 +27,7 @@ module TrainDelayMetrics
     private
 
     def connection
-      @connection ||= DuckDB::Database.new.connect
+      @connection ||= Sql.connect(@parquet_glob)
     end
   end
 end

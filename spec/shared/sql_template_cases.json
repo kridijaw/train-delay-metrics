@@ -1,0 +1,128 @@
+[
+  {
+    "name": "scalar",
+    "text": "SELECT * FROM t WHERE a = {{a}}",
+    "params": { "a": 5 },
+    "sql": "SELECT * FROM t WHERE a = ?",
+    "binds": [5]
+  },
+  {
+    "name": "list",
+    "text": "WHERE eva IN ({{evas*}})",
+    "params": { "evas": ["1", "2", "3"] },
+    "sql": "WHERE eva IN (?, ?, ?)",
+    "binds": ["1", "2", "3"]
+  },
+  {
+    "name": "single-element list",
+    "text": "WHERE eva IN ({{evas*}})",
+    "params": { "evas": ["1"] },
+    "sql": "WHERE eva IN (?)",
+    "binds": ["1"]
+  },
+  {
+    "name": "repeated scalar",
+    "text": "x >= {{t}} AND y >= {{t}}",
+    "params": { "t": 20 },
+    "sql": "x >= ? AND y >= ?",
+    "binds": [20, 20]
+  },
+  {
+    "name": "binds follow text order",
+    "text": "a IN ({{names*}}) AND b IN ({{evas*}}) AND c >= {{cutoff}} AND d IN ({{names*}})",
+    "params": { "cutoff": "2025-01-01", "evas": ["E"], "names": ["N1", "N2"] },
+    "sql": "a IN (?, ?) AND b IN (?) AND c >= ? AND d IN (?, ?)",
+    "binds": ["N1", "N2", "E", "2025-01-01", "N1", "N2"]
+  },
+  {
+    "name": "section kept",
+    "text": "WHERE 1 {{#cutoff}}AND d >= {{cutoff}}{{/cutoff}} AND e = {{e}}",
+    "params": { "cutoff": "2025-01-01", "e": 1 },
+    "sql": "WHERE 1 AND d >= ? AND e = ?",
+    "binds": ["2025-01-01", 1]
+  },
+  {
+    "name": "section kept with list",
+    "text": "WHERE 1 {{#types}}AND t NOT IN ({{types*}}){{/types}}",
+    "params": { "types": ["FLX", "IC"] },
+    "sql": "WHERE 1 AND t NOT IN (?, ?)",
+    "binds": ["FLX", "IC"]
+  },
+  {
+    "name": "section dropped for nil",
+    "text": "WHERE 1 {{#cutoff}}AND d >= {{cutoff}}{{/cutoff}} AND e = {{e}}",
+    "params": { "cutoff": null, "e": 1 },
+    "sql": "WHERE 1  AND e = ?",
+    "binds": [1]
+  },
+  {
+    "name": "section dropped for missing key",
+    "text": "WHERE 1 {{#cutoff}}AND d >= {{cutoff}}{{/cutoff}}",
+    "params": {},
+    "sql": "WHERE 1 ",
+    "binds": []
+  },
+  {
+    "name": "section dropped for empty list",
+    "text": "WHERE 1 {{#types}}AND t NOT IN ({{types*}}){{/types}}",
+    "params": { "types": [] },
+    "sql": "WHERE 1 ",
+    "binds": []
+  },
+  {
+    "name": "multiline section",
+    "text": "WHERE 1\n  {{#a}}AND x = {{a}}\n  AND y = {{a}}{{/a}}\n",
+    "params": { "a": 2 },
+    "sql": "WHERE 1\n  AND x = ?\n  AND y = ?\n",
+    "binds": [2, 2]
+  },
+  {
+    "name": "text without markers",
+    "text": "SELECT 1",
+    "params": {},
+    "sql": "SELECT 1",
+    "binds": []
+  },
+  {
+    "name": "nested section",
+    "text": "{{#a}}x {{#b}}y{{/b}} z{{/a}}",
+    "params": { "a": 1, "b": 2 },
+    "error": true
+  },
+  {
+    "name": "unclosed section",
+    "text": "WHERE 1 {{#a}}AND x = {{a}}",
+    "params": { "a": 1 },
+    "error": true
+  },
+  {
+    "name": "missing key",
+    "text": "a = {{a}}",
+    "params": {},
+    "error": true
+  },
+  {
+    "name": "nil scalar",
+    "text": "a = {{a}}",
+    "params": { "a": null },
+    "error": true
+  },
+  {
+    "name": "empty list",
+    "text": "eva IN ({{evas*}})",
+    "params": { "evas": [] },
+    "error": true
+  },
+  {
+    "name": "missing list",
+    "text": "eva IN ({{evas*}})",
+    "params": {},
+    "error": true
+  },
+  {
+    "name": "list marker given a scalar",
+    "text": "eva IN ({{evas*}})",
+    "params": { "evas": "1" },
+    "error": true
+  }
+]
