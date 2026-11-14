@@ -50,7 +50,7 @@ export function StationPicker({ id, label, stations, stationsByEva, value, noMat
       <legend>{label}</legend>
       <input
         type="search"
-        placeholder={stations ? "Station name, e.g. Berlin Hbf or K%ln" : "Loading stations..."}
+        placeholder={stations ? "Station name, e.g. Köln Hbf or Berlin%Hbf" : "Loading stations..."}
         disabled={!stations}
         value={value.query}
         aria-label={`${label} station search`}
