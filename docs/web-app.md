@@ -28,6 +28,8 @@ Both implementations are checked against `spec/shared/sql_template_cases.json`. 
 - `all/stations.json`: the same shape, over every station.
 - `manifest.json`: rebuilt from the files on disk after every build, for every dataset that has files.
 
+Both `facts*.sql` files derive `train_name` and `is_canceled` from upstream's raw columns and drop rows with no `train_type`, the same mapping `TrainDelayMetrics::Sql.connect` applies for the CLI (see the README's schema reference). Change one, change the other. Upstream reprocesses its whole history when its schema changes, so after such a change re-run `ruby script/fetch_dataset.rb` (it re-downloads months whose size changed) and do a full rebuild.
+
 ```json
 {
   "built_at": "2026-11-14T22:06:49.531Z",

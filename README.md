@@ -34,7 +34,7 @@ BAHN_FROM=2025-01 BAHN_TO=2025-03 ruby script/fetch_dataset.rb      # range
 BAHN_FILES=data-2025-01.parquet ruby script/fetch_dataset.rb        # explicit list
 ```
 
-Files land in `data/deutsche_bahn/`. Re-runs are idempotent. Months that don't exist yet are reported as `miss` and skipped (not an error). Any other failed download is reported as `ERROR` and makes the script exit 1 after it has tried every month. An empty `BAHN_FROM` or `BAHN_TO` counts as unset.
+Files land in `data/deutsche_bahn/`. Re-runs are idempotent: a month is downloaded again only when its size differs from the remote file, which happens when upstream reprocesses its history. Months that don't exist yet are reported as `miss` and skipped (not an error). Any other failed download is reported as `ERROR` and makes the script exit 1 after it has tried every month. An empty `BAHN_FROM` or `BAHN_TO` counts as unset.
 
 ## Workflow
 
@@ -265,17 +265,17 @@ See [docs/web-app.md](docs/web-app.md) for the architecture, the data build, the
 
 ## Schema reference
 
-Each row in `monthly_processed_data/` is one *stop event* — one (train, calendar day, station) triple. Columns the queries care about:
+Each row in `monthly_processed_data/` is one *stop event* — one (train, calendar day, station) triple. The queries read a `stop_events` view over these files. Two of its columns are derived from upstream's raw ones (`TrainDelayMetrics::Sql.connect`), and rows with no `train_type` (change records without a timetable entry) are dropped. Columns the queries care about:
 
 | column | type | notes |
 | --- | --- | --- |
-| `train_name` | string | e.g. `"ICE 821"`, `"RE 5"` |
+| `train_name` | string | derived: `train_type`, a space, then `line_number` or else `train_number`, e.g. `"ICE 821"`, `"RE RE7"` |
 | `eva` | string | EVA station id, zero-padded (e.g. `"08000105"`) |
 | `train_type` | string | e.g. `"ICE"`, `"FLX"`, `"S"` |
 | `delay_in_min` | integer | already in **minutes** (not seconds) |
 | `arrival_planned_time` | timestamp | NULL for stops with no arrival (origin) |
 | `departure_planned_time` | timestamp | NULL for stops with no departure (terminus) |
-| `is_canceled` | boolean | reported as `Cancel` count; excluded from `Trips` and the delay percentage |
+| `is_canceled` | boolean | derived: `arrival_is_canceled OR departure_is_canceled`; reported as `Cancel` count; excluded from `Trips` and the delay percentage |
 | `train_line_ride_id` | string | identifies a *scheduled service* (reused across days), not a unique daily run |
 
 Queries filter `arrival_planned_time IS NOT NULL` (or `departure_planned_time IS NOT NULL` for origin-side time-of-day). Canceled rows are kept and counted separately so a frequently-canceled train doesn't masquerade as a punctual one — `Trips` and `Delay probability` are computed over rows that actually ran (`is_canceled = FALSE`); `Cancel` is the count of `is_canceled = TRUE` rows in the same window.

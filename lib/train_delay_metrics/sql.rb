@@ -54,9 +54,22 @@ module TrainDelayMetrics
       stmt.execute
     end
 
+    # Upstream's raw columns, mapped onto the stop_events schema the shared SQL reads.
+    # web/scripts/sql/facts*.sql apply the same mapping when building the browser's files.
+    RAW_PROJECTION = <<~SQL
+      SELECT *,
+             concat_ws(' ', train_type, COALESCE(line_number, train_number)) AS train_name,
+             arrival_is_canceled OR departure_is_canceled                     AS is_canceled
+      FROM %<source>s
+      WHERE train_type IS NOT NULL
+    SQL
+
     def connect(parquet_glob)
       conn = DuckDB::Database.new.connect
-      conn.query("CREATE OR REPLACE TEMP VIEW stop_events AS SELECT * FROM read_parquet('#{parquet_glob.to_s.gsub("'", "''")}')")
+      source = "read_parquet('#{parquet_glob.to_s.gsub("'", "''")}')"
+      columns = conn.query("DESCRIBE SELECT * FROM #{source}").map(&:first)
+      select = columns.include?("arrival_is_canceled") ? format(RAW_PROJECTION, source: source) : "SELECT * FROM #{source}"
+      conn.query("CREATE OR REPLACE TEMP VIEW stop_events AS #{select}")
       conn
     end
 

@@ -1,5 +1,6 @@
 require "spec_helper"
 require "json"
+require "tmpdir"
 
 RSpec.describe TrainDelayMetrics::Sql do
   shared_dir = File.expand_path("shared", __dir__)
@@ -41,6 +42,28 @@ RSpec.describe TrainDelayMetrics::Sql do
         sql, = described_class.expand(described_class.load(File.basename(path, ".sql")), params)
         expect(sql).not_to include("{{")
       end
+    end
+  end
+
+  describe ".connect" do
+    around do |ex|
+      Dir.mktmpdir("sql-connect-spec") { |dir| @dir = dir; ex.run }
+    end
+
+    it "maps upstream's raw columns onto stop_events" do
+      path = File.join(@dir, "raw.parquet")
+      DuckDB::Database.new.connect.execute(<<~SQL)
+        COPY (SELECT * FROM (VALUES
+          ('ICE', '619',   NULL,  FALSE, FALSE),
+          ('RE',  '3730',  'RE7', TRUE,  FALSE),
+          ('S',   '38137', 'S1',  FALSE, TRUE),
+          (NULL,  NULL,    'S3',  FALSE, FALSE)
+        ) AS t(train_type, train_number, line_number, arrival_is_canceled, departure_is_canceled))
+        TO '#{path}' (FORMAT PARQUET)
+      SQL
+
+      rows = described_class.connect(path).query("SELECT train_name, is_canceled FROM stop_events ORDER BY train_name").to_a
+      expect(rows).to eq([["ICE 619", false], ["RE RE7", true], ["S S1", true]])
     end
   end
 end
