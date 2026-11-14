@@ -6,3 +6,7 @@
 *.duckdb.wal
 .DS_Store
 .rspec_status
+/web/node_modules/
+/web/dist/
+/web/public/data/
+/web/.wrangler/

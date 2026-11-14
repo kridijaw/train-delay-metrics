@@ -1,0 +1,75 @@
+name: Deploy web app
+
+on:
+  schedule:
+    - cron: "17 4 5 * *"
+  workflow_dispatch:
+    inputs:
+      full:
+        description: Rebuild every quarter from the full raw archive instead of the last two
+        type: boolean
+        default: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    concurrency: deploy-web
+    permissions:
+      contents: read
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+
+      - id: quarters
+        run: node scripts/ci-quarters.mjs
+
+      - name: Download raw months
+        working-directory: .
+        env:
+          FULL: ${{ inputs.full }}
+          FROM: ${{ steps.quarters.outputs.from }}
+        run: |
+          if [ "$FULL" != "true" ]; then
+            export BAHN_FROM="$FROM"
+          fi
+          ruby script/fetch_dataset.rb
+
+      - name: Fetch the deployed data
+        if: ${{ !inputs.full }}
+        run: node scripts/fetch-deployed-data.mjs "${{ vars.SITE_URL }}/data" public/data
+
+      - name: Build data
+        env:
+          FULL: ${{ inputs.full }}
+          QUARTERS: ${{ steps.quarters.outputs.quarters }}
+        run: |
+          if [ "$FULL" = "true" ]; then
+            npm run build:data
+          else
+            npm run build:data -- --quarters "$QUARTERS"
+          fi
+
+      - run: npm test
+      - run: npm run build
+      - run: npm run check:assets -- dist
+
+      - run: npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

@@ -4,10 +4,11 @@
 #
 # Coverage: monthly files exist from 2024-07 onward. Months before that
 # return 404 and are skipped. Re-runs are idempotent (existing files skipped).
+# Exits 1 if any download failed (a 404 is not a failure).
 #
 # Env overrides:
-#   BAHN_FROM   YYYY-MM (default 2024-07)
-#   BAHN_TO     YYYY-MM (default current month)
+#   BAHN_FROM   YYYY-MM (default 2024-07; empty counts as unset)
+#   BAHN_TO     YYYY-MM (default current month; empty counts as unset)
 #   BAHN_FILES  comma-separated list (overrides FROM/TO)
 #                e.g. "data-2024-07.parquet,data-2024-08.parquet"
 
@@ -56,17 +57,23 @@ def download(url, target)
   [:error, "too many redirects"]
 end
 
+def env_value(name)
+  value = ENV[name]&.strip
+  value unless value.nil? || value.empty?
+end
+
 files =
   if (env = ENV["BAHN_FILES"]) && !env.strip.empty?
     env.split(",").map(&:strip).reject(&:empty?)
   else
     month_range(
-      ENV.fetch("BAHN_FROM", "2024-07"),
-      ENV.fetch("BAHN_TO",   Date.today.strftime("%Y-%m"))
+      env_value("BAHN_FROM") || "2024-07",
+      env_value("BAHN_TO")   || Date.today.strftime("%Y-%m")
     )
   end
 
 FileUtils.mkdir_p(DEST)
+errors = 0
 
 files.each do |name|
   target = File.join(DEST, name)
@@ -78,8 +85,14 @@ files.each do |name|
   case (result = download("#{BASE}/#{name}", target))
   when :ok      then puts "ok     #{name} (#{File.size(target)} bytes)"
   when :missing then puts "miss   #{name} (404 — month not published)"
-  else               warn "ERROR  #{name}: #{result.inspect}"
+  else
+    warn "ERROR  #{name}: #{result.inspect}"
+    errors += 1
   end
 end
 
 puts "done -> #{DEST}"
+if errors.positive?
+  warn "#{errors} download(s) failed"
+  exit 1
+end

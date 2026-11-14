@@ -1,0 +1,31 @@
+{
+  "name": "train-delay-metrics-web",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build:data": "node scripts/build-data.mjs",
+    "check:assets": "node scripts/check-assets.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "@duckdb/node-api": "2.0.0-r.1",
+    "@preact/preset-vite": "2.10.6",
+    "@types/node": "24.19.2",
+    "typescript": "7.0.2",
+    "vite": "8.3.8",
+    "vitest": "5.1.0",
+    "wrangler": "4.162.0"
+  },
+  "dependencies": {
+    "@duckdb/duckdb-wasm": "1.33.1-dev115.0",
+    "preact": "11.2.0"
+  }
+}

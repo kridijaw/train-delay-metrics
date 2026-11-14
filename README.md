@@ -14,6 +14,7 @@ Commercial sources (e.g. Zugfinder Pro) cap historical statistical lookback at ~
 - [1. `find-stations` — find EVAs](#1-find-stations--find-evas)
 - [2. `find-trains` — map trains to from/to EVAs](#2-find-trains--map-trains-to-fromto-evas)
 - [3. `train-delay` — compute delay statistics](#3-train-delay--compute-delay-statistics)
+- [Web app](#web-app)
 - [Schema reference](#schema-reference)
 - [Test](#test)
 - [Attribution](#attribution)
@@ -33,7 +34,7 @@ BAHN_FROM=2025-01 BAHN_TO=2025-03 ruby script/fetch_dataset.rb      # range
 BAHN_FILES=data-2025-01.parquet ruby script/fetch_dataset.rb        # explicit list
 ```
 
-Files land in `data/deutsche_bahn/`. Re-runs are idempotent. Months that don't exist yet are reported as `miss` and skipped (not an error).
+Files land in `data/deutsche_bahn/`. Re-runs are idempotent. Months that don't exist yet are reported as `miss` and skipped (not an error). Any other failed download is reported as `ERROR` and makes the script exit 1 after it has tried every month. An empty `BAHN_FROM` or `BAHN_TO` counts as unset.
 
 ## Workflow
 
@@ -250,6 +251,18 @@ When a group has a `to` array, `train-delay` measures delay at the destination a
 | `--months` | `6` | lookback window from today, in months. Mutually exclusive with `--years`. |
 | `--data` | `path/*.parquet` | override the Parquet glob |
 
+## Web app
+
+`web/` holds a browser version of the same workflow: pick stations, see the connecting trains grouped by stops, and get the delay table, with every query running locally in DuckDB-WASM on slim quarterly Parquet files. It is deployed as static files to Cloudflare and refreshed monthly by GitHub Actions.
+
+```sh
+cd web && npm ci
+npm run build:data -- --raw ../data/deutsche_bahn   # writes public/data/
+npm run dev
+```
+
+See [docs/web-app.md](docs/web-app.md) for the architecture, the data build, the refresh workflow and the first-deploy runbook.
+
 ## Schema reference
 
 Each row in `monthly_processed_data/` is one *stop event* — one (train, calendar day, station) triple. Columns the queries care about:
@@ -271,7 +284,10 @@ Queries filter `arrival_planned_time IS NOT NULL` (or `departure_planned_time IS
 
 ```sh
 bundle exec rspec
+(cd web && npm test)
 ```
+
+Both suites run the shared `sql/` files, so a query change is checked from Ruby and from JavaScript.
 
 The test suite builds tiny synthetic Parquet fixtures via DuckDB and asserts the queries return the expected counts — no network, no real dataset required.
 

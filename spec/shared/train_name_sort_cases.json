@@ -1,0 +1,37 @@
+[
+  {
+    "name": "alphabetic prefix, then digit length, then digit value",
+    "input": ["ICE 1052", "ICE 10", "ICE 999", "ICE 100", "IC 50", "ICE 9", "NJ"],
+    "expected": ["IC 50", "ICE 9", "ICE 10", "ICE 100", "ICE 999", "ICE 1052", "NJ"]
+  },
+  {
+    "name": "3-digit before 4-digit",
+    "input": ["ICE 1052", "ICE 999"],
+    "expected": ["ICE 999", "ICE 1052"]
+  },
+  {
+    "name": "names with no number suffix",
+    "input": ["NJ", "ICE", "IC"],
+    "expected": ["IC", "ICE", "NJ"]
+  },
+  {
+    "name": "case-insensitive prefix",
+    "input": ["ice 10", "ICE 9"],
+    "expected": ["ICE 9", "ice 10"]
+  },
+  {
+    "name": "leading zeros count toward digit length",
+    "input": ["RJX 100", "RJX 007", "RJX 70"],
+    "expected": ["RJX 70", "RJX 007", "RJX 100"]
+  },
+  {
+    "name": "mixed types from real data",
+    "input": ["FLX 30", "ICE 2401", "EC 7", "ICE 75", "ECE 100", "EC 113", "NJ 40420", "NJ"],
+    "expected": ["EC 7", "EC 113", "ECE 100", "FLX 30", "ICE 75", "ICE 2401", "NJ", "NJ 40420"]
+  },
+  {
+    "name": "digit run longer than a double's integer precision",
+    "input": ["X 90071992547409930", "X 90071992547409929"],
+    "expected": ["X 90071992547409929", "X 90071992547409930"]
+  }
+]

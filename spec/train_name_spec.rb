@@ -1,4 +1,12 @@
+require "json"
+
 RSpec.describe TrainDelayMetrics::TrainName do
+  JSON.parse(File.read(File.expand_path("shared/train_name_sort_cases.json", __dir__))).each do |c|
+    it "sorts shared case: #{c["name"]}" do
+      expect(c["input"].sort_by { |n| described_class.sort_key(n) }).to eq(c["expected"])
+    end
+  end
+
   it "sorts by alphabetic prefix, then by digit length, then by digit value" do
     names = ["ICE 1052", "ICE 10", "ICE 999", "ICE 100", "IC 50", "ICE 9", "NJ"]
     sorted = names.sort_by { |n| described_class.sort_key(n) }
