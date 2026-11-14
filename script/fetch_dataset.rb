@@ -3,7 +3,9 @@
 # dataset on Hugging Face into data/deutsche_bahn/.
 #
 # Coverage: monthly files exist from 2024-07 onward. Months before that
-# return 404 and are skipped. Re-runs are idempotent (existing files skipped).
+# return 404 and are skipped. Re-runs are idempotent: a local file is kept when
+# its size matches the remote one, and downloaded again when upstream has
+# reprocessed it.
 # Exits 1 if any download failed (a 404 is not a failure).
 #
 # Env overrides:
@@ -33,6 +35,19 @@ def month_range(from_str, to_str)
   end
 end
 
+def remote_size(url)
+  MAX_REDIRECTS.times do
+    uri = URI(url)
+    resp = Net::HTTP.start(uri.host, uri.port, use_ssl: uri.scheme == "https") { |http| http.head(uri.request_uri) }
+    case resp
+    when Net::HTTPSuccess     then return resp["content-length"]&.to_i
+    when Net::HTTPRedirection then url = resp["location"]
+    else return nil
+    end
+  end
+  nil
+end
+
 def download(url, target)
   remaining = MAX_REDIRECTS
   while remaining.positive?
@@ -41,7 +56,9 @@ def download(url, target)
       http.request_get(uri.request_uri) do |resp|
         case resp
         when Net::HTTPSuccess
-          File.open(target, "wb") { |f| resp.read_body { |chunk| f.write(chunk) } }
+          tmp = "#{target}.part"
+          File.open(tmp, "wb") { |f| resp.read_body { |chunk| f.write(chunk) } }
+          File.rename(tmp, target)
           return :ok
         when Net::HTTPRedirection
           url = resp["location"]
@@ -77,12 +94,17 @@ errors = 0
 
 files.each do |name|
   target = File.join(DEST, name)
+  url = "#{BASE}/#{name}"
   if File.exist?(target) && File.size(target).positive?
-    puts "skip   #{name} (exists)"
-    next
+    remote = remote_size(url)
+    if remote.nil? || remote == File.size(target)
+      puts "skip   #{name} (#{remote.nil? ? "exists, remote size unknown" : "up to date"})"
+      next
+    end
+    puts "stale  #{name} (local #{File.size(target)} bytes, remote #{remote})"
   end
 
-  case (result = download("#{BASE}/#{name}", target))
+  case (result = download(url, target))
   when :ok      then puts "ok     #{name} (#{File.size(target)} bytes)"
   when :missing then puts "miss   #{name} (404 — month not published)"
   else
