@@ -1,0 +1,41 @@
+name: Uptime
+
+on:
+  schedule:
+    - cron: "41 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      SITE_URL: ${{ vars.SITE_URL }}
+    steps:
+      - name: Page loads
+        run: curl -sSf --retry 3 --retry-all-errors -o /dev/null "$SITE_URL/"
+
+      # The SPA fallback answers a missing manifest with index.html and 200, so a status check alone would pass.
+      - name: Manifest is current
+        run: |
+          curl -sSf --retry 3 --retry-all-errors -o manifest.json "$SITE_URL/data/manifest.json"
+          jq -e '.datasets | length > 0' manifest.json > /dev/null
+          built_at=$(jq -r .built_at manifest.json)
+          age_days=$(( ($(date +%s) - $(date -d "$built_at" +%s)) / 86400 ))
+          echo "built_at=$built_at ($age_days days ago)"
+          if [ "$age_days" -gt 40 ]; then
+            echo "::error::Data is $age_days days old; the monthly deploy has not run."
+            exit 1
+          fi
+
+      - name: First data file is served
+        run: |
+          path=$(jq -r '[.datasets[].files[]][0].path' manifest.json)
+          bytes=$(jq -r '[.datasets[].files[]][0].bytes' manifest.json)
+          got=$(curl -sSf --retry 3 --retry-all-errors -o /dev/null -w '%{size_download}' "$SITE_URL/data/$path")
+          if [ "$got" != "$bytes" ]; then
+            echo "::error::$path is $got bytes, manifest says $bytes."
+            exit 1
+          fi
