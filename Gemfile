@@ -1,6 +1,6 @@
 source "https://rubygems.org"
 
-gem "duckdb", "~> 1.1"
+gem "duckdb", "~> 2.0"
 
 group :development, :test do
   gem "rspec", "~> 3.13"
