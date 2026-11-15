@@ -118,8 +118,8 @@ The file count is the limit that grows: the all-trains dataset adds up to 256 fi
 The workflow never makes the first deploy: a scheduled run expects a live site to fetch from. Do it once from your machine with the full raw archive in `data/deutsche_bahn/` (`ruby script/fetch_dataset.rb`):
 
 1. `cd web && npx wrangler login`
-2. `npm run build:data && npm run build && npx wrangler deploy`. Note the `*.workers.dev` URL it prints.
-3. In the Cloudflare dashboard, create an API token from the "Edit Cloudflare Workers" template.
-4. In the GitHub repository settings, add the secrets `CLOUDFLARE_API_TOKEN` (the token) and `CLOUDFLARE_ACCOUNT_ID`, and the variable `SITE_URL` (the site's base URL with no trailing slash, for example `https://train-delay-metrics.<subdomain>.workers.dev`).
+2. `npm run build:data && npm run build && npx wrangler deploy`. The site is served only at the Custom Domain `bahn.kridi.dev` (`routes` in `web/wrangler.jsonc`); `workers_dev` is off. The `kridi.dev` zone must be active on the same Cloudflare account, and the hostname must not have a CNAME record. Wrangler creates the DNS record and certificate.
+3. In the Cloudflare dashboard, create a custom API token with one permission, Account > Workers Scripts > Edit, limited to that account. That also covers attaching the Custom Domain. Leave IP filtering off, because GitHub-hosted runners have no fixed addresses.
+4. In the GitHub repository settings, add the secrets `CLOUDFLARE_API_TOKEN` (the token) and `CLOUDFLARE_ACCOUNT_ID`, and the variable `SITE_URL` (the site's base URL with no trailing slash: `https://bahn.kridi.dev`).
 
 After that, the monthly workflow keeps the site current. Run it once by hand to confirm the secrets work.

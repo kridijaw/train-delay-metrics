@@ -5,5 +5,8 @@
   "assets": {
     "directory": "./dist",
     "not_found_handling": "single-page-application"
-  }
+  },
+  "routes": [{ "pattern": "bahn.kridi.dev", "custom_domain": true }],
+  "workers_dev": false,
+  "preview_urls": false
 }
