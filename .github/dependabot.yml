@@ -10,6 +10,9 @@ updates:
     ignore:
       # Pinned to a `next` dist-tag build on purpose; see docs/web-app.md.
       - dependency-name: "@duckdb/duckdb-wasm"
+      # Majors track the Node release (engines, CI); bump with the runtime.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
 
   - package-ecosystem: bundler
     directory: /

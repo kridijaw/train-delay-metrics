@@ -98,7 +98,7 @@ A manual run with the `full` input checked skips step 3, downloads the whole arc
 ## CI and monitoring
 
 - `.github/workflows/test.yml` runs `bundle exec rspec`, `npm test` and `npm run build` on every push and pull request. The Ruby job installs the DuckDB C library from the release tarball pinned in `DUCKDB_VERSION`, because Ubuntu does not package it. Bump that together with `brew upgrade duckdb` locally.
-- `.github/dependabot.yml` opens weekly update PRs for npm (`web/`), bundler and GitHub Actions, with minor and patch bumps grouped into one PR per ecosystem. `@duckdb/duckdb-wasm` is ignored: it is pinned to a `next` build, and the test suite runs on `@duckdb/node-api`, so a WASM bump needs the browser smoke test by hand.
+- `.github/dependabot.yml` opens weekly update PRs for npm (`web/`), bundler and GitHub Actions, with minor and patch bumps grouped into one PR per ecosystem. `@duckdb/duckdb-wasm` is ignored: it is pinned to a `next` build, and the test suite runs on `@duckdb/node-api`, so a WASM bump needs the browser smoke test by hand. Major bumps of `@types/node` are ignored too, since its major must match the Node version in `engines` and the workflows; raise it together with the runtime.
 - `.github/workflows/uptime.yml` checks `$SITE_URL` every hour: the page loads, `data/manifest.json` parses as JSON with at least one dataset, `built_at` is at most 40 days old (so a monthly deploy that stopped running is caught too), and the first listed Parquet file is served at its manifest size. A failed run sends the usual GitHub Actions failure email.
 
 ## Free-tier limits
