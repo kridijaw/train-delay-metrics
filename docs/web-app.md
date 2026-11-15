@@ -95,6 +95,12 @@ A scheduled run rebuilds only the previous and the current quarter:
 
 A manual run with the `full` input checked skips step 3, downloads the whole archive from 2024-07 and rebuilds every quarter. Use it after changing `facts.sql`, the type list or the manifest format, or when the live site is broken.
 
+## CI and monitoring
+
+- `.github/workflows/test.yml` runs `bundle exec rspec`, `npm test` and `npm run build` on every push and pull request. The Ruby job installs the DuckDB C library from the release tarball pinned in `DUCKDB_VERSION`, because Ubuntu does not package it. Bump that together with `brew upgrade duckdb` locally.
+- `.github/dependabot.yml` opens weekly update PRs for npm (`web/`), bundler and GitHub Actions, with minor and patch bumps grouped into one PR per ecosystem. `@duckdb/duckdb-wasm` is ignored: it is pinned to a `next` build, and the test suite runs on `@duckdb/node-api`, so a WASM bump needs the browser smoke test by hand.
+- `.github/workflows/uptime.yml` checks `$SITE_URL` every hour: the page loads, `data/manifest.json` parses as JSON with at least one dataset, `built_at` is at most 40 days old (so a monthly deploy that stopped running is caught too), and the first listed Parquet file is served at its manifest size. A failed run sends the usual GitHub Actions failure email.
+
 ## Free-tier limits
 
 Cloudflare Workers static assets on the free plan:
@@ -110,7 +116,7 @@ The file count is the limit that grows: the all-trains dataset adds up to 256 fi
 ## Known limits
 
 - jsDelivr is a runtime dependency: if it is down, the page loads but cannot run queries. This is accepted, because the WASM binary cannot be self-hosted under the 25 MiB cap.
-- GitHub disables `schedule` triggers on public repositories after 60 days without repository activity. Re-enable the workflow from the Actions tab when that happens.
+- GitHub disables `schedule` triggers on public repositories after 60 days without repository activity. Re-enable the workflow from the Actions tab when that happens. This applies to the uptime check as well, and merging Dependabot PRs counts as activity.
 - The site only covers what the upstream dataset publishes: monthly files start at 2024-07.
 
 ## Owner's first deploy
