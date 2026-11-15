@@ -1,0 +1,60 @@
+name: Test
+
+on:
+  push:
+    branches-ignore:
+      - "dependabot/**"
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  ruby:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      DUCKDB_VERSION: v2.0.0
+    steps:
+      - uses: actions/checkout@v4
+
+      # The duckdb gem compiles against the C library, which Ubuntu does not package.
+      - name: Install libduckdb
+        run: |
+          curl -sSfL -o "$RUNNER_TEMP/libduckdb.tar.gz" \
+            "https://github.com/duckdb/duckdb/releases/download/$DUCKDB_VERSION/duckdb-shared-libs-linux-amd64.tar.gz"
+          sudo tar -xzf "$RUNNER_TEMP/libduckdb.tar.gz" -C /usr/local/lib libduckdb.so
+          sudo tar -xzf "$RUNNER_TEMP/libduckdb.tar.gz" -C /usr/local/include --wildcards '*.h'
+          sudo ldconfig
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: "3.4"
+          bundler-cache: true
+          cache-version: ${{ env.DUCKDB_VERSION }}
+
+      - run: bundle exec rspec
+
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
