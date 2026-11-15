@@ -18,7 +18,7 @@
   "devDependencies": {
     "@duckdb/node-api": "2.0.0-r.1",
     "@preact/preset-vite": "2.10.6",
-    "@types/node": "24.19.2",
+    "@types/node": "26.6.6",
     "typescript": "7.0.2",
     "vite": "8.3.8",
     "vitest": "5.1.0",
